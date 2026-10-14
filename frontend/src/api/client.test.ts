@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mockFetch } from '../test/fetchMock'
-import { ApiError, apiRequest } from './client'
+import { mockFetch, TEST_CSRF_TOKEN } from '../test/fetchMock'
+import { ApiError, apiRequest, setUnauthorizedHandler } from './client'
 
 describe('apiRequest', () => {
   it('returns parsed JSON and sends JSON bodies', async () => {
@@ -9,7 +9,7 @@ describe('apiRequest', () => {
     const result = await apiRequest<{ id: number }>('POST', '/drugs', { name: 'X' })
 
     expect(result).toEqual({ id: 1, name: 'X' })
-    const [, init] = fetchMock.mock.calls[0]
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/drugs')!
     expect(init?.body).toBe('{"name":"X"}')
     expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json')
   })
@@ -55,5 +55,63 @@ describe('apiRequest', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Bad gateway', { status: 502 })))
 
     await expect(apiRequest('GET', '/patients')).rejects.toThrow('Cannot reach the backend')
+  })
+
+  it('fetches the CSRF token once and sends it on changes but not on reads', async () => {
+    const fetchMock = mockFetch({ 'GET /api/drugs': { body: [] }, 'POST /api/drugs': { status: 201, body: {} }, 'DELETE /api/drugs/1': { status: 204 } })
+
+    await apiRequest('GET', '/drugs')
+    await apiRequest('POST', '/drugs', {})
+    await apiRequest('DELETE', '/drugs/1')
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => ({ url, method: init?.method, headers: init?.headers as Record<string, string> }))
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['GET /api/drugs', 'GET /api/auth/csrf', 'POST /api/drugs', 'DELETE /api/drugs/1'])
+    expect(calls[0].headers['X-CSRF-TOKEN']).toBeUndefined()
+    expect(calls[2].headers['X-CSRF-TOKEN']).toBe(TEST_CSRF_TOKEN)
+    expect(calls[3].headers['X-CSRF-TOKEN']).toBe(TEST_CSRF_TOKEN)
+  })
+
+  it('gets a new CSRF token and retries once when the token is rejected', async () => {
+    let tokens = 0
+    let posts = 0
+    const fetchMock = mockFetch({
+      'GET /api/auth/csrf': () => ({ body: { headerName: 'X-CSRF-TOKEN', token: `token-${++tokens}` } }),
+      'POST /api/patients': () => (++posts === 1
+        ? { status: 403, body: { status: 403, detail: 'Missing or invalid CSRF token', code: 'CSRF' } }
+        : { status: 201, body: { id: 4 } }),
+    })
+
+    await expect(apiRequest('POST', '/patients', {})).resolves.toEqual({ id: 4 })
+
+    const sent = fetchMock.mock.calls.filter(([url]) => url === '/api/patients').map(([, init]) => (init?.headers as Record<string, string>)['X-CSRF-TOKEN'])
+    expect(sent).toEqual(['token-1', 'token-2'])
+  })
+
+  it('does not retry more than once when the CSRF token keeps being rejected', async () => {
+    const fetchMock = mockFetch({ 'POST /api/patients': { status: 403, body: { status: 403, detail: 'Missing or invalid CSRF token', code: 'CSRF' } } })
+
+    await expect(apiRequest('POST', '/patients', {})).rejects.toThrow('Missing or invalid CSRF token')
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/patients')).toHaveLength(2)
+  })
+
+  it('shows a role refusal (403) without retrying', async () => {
+    const fetchMock = mockFetch({ 'DELETE /api/drugs/1': { status: 403, body: { status: 403, detail: 'Your role does not allow this action' } } })
+
+    await expect(apiRequest('DELETE', '/drugs/1')).rejects.toThrow('Your role does not allow this action')
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/drugs/1')).toHaveLength(1)
+  })
+
+  it('reports an ended session (401) to the auth handler, except for the auth endpoints', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    mockFetch({
+      'GET /api/patients': { status: 401, body: { status: 401, detail: 'You are not logged in or your session has ended' } },
+      'GET /api/auth/me': { status: 401, body: { status: 401, detail: 'You are not logged in or your session has ended' } },
+    })
+
+    await expect(apiRequest('GET', '/auth/me')).rejects.toThrow()
+    expect(handler).not.toHaveBeenCalled()
+    await expect(apiRequest('GET', '/patients')).rejects.toThrow('You are not logged in or your session has ended')
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })

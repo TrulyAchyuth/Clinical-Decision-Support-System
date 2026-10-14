@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -36,12 +37,12 @@ import com.cdss.service.PatientService;
 
 @WebMvcTest(PatientController.class)
 @Import(SecurityConfig.class)
-@WithMockUser
+@WithMockUser(roles = "CLINICIAN")
 class PatientControllerTests {
 
 	private static final String VALID_PATIENT = """
-			{"fullName": "Alex Example", "dateOfBirth": "1958-04-12", "gender": "MALE",
-			 "phone": "+1 555 0101", "email": "alex@example.com", "address": "1 Sample Street"}
+			{"fullName": "Daniel Okafor", "dateOfBirth": "1958-04-12", "gender": "MALE",
+			 "phone": "+1 555 0101", "email": "daniel@example.com", "address": "14 Harbour Lane"}
 			""";
 
 	@Autowired
@@ -52,20 +53,20 @@ class PatientControllerTests {
 
 	@Test
 	void createReturns201WithLocationAndBody() throws Exception {
-		given(patientService.create(any(PatientRequest.class))).willReturn(patient(7L, "Alex Example"));
+		given(patientService.create(any(PatientRequest.class))).willReturn(patient(7L, "Daniel Okafor"));
 
-		mvc.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
+		mvc.perform(post("/api/patients").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
 			.andExpect(status().isCreated())
 			.andExpect(header().string("Location", "http://localhost/api/patients/7"))
 			.andExpect(jsonPath("$.id").value(7))
-			.andExpect(jsonPath("$.fullName").value("Alex Example"))
+			.andExpect(jsonPath("$.fullName").value("Daniel Okafor"))
 			.andExpect(jsonPath("$.dateOfBirth").value("1958-04-12"))
 			.andExpect(jsonPath("$.gender").value("MALE"));
 	}
 
 	@Test
 	void createWithMissingRequiredFieldsReturns400WithFieldErrors() throws Exception {
-		mvc.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON).content("{}"))
+		mvc.perform(post("/api/patients").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.detail").value("Validation failed"))
 			.andExpect(jsonPath("$.errors.fullName").exists())
@@ -80,7 +81,7 @@ class PatientControllerTests {
 				{"fullName": "  ", "dateOfBirth": "2999-01-01", "gender": "MALE",
 				 "phone": "call me", "email": "not-an-email"}
 				""";
-		mvc.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON).content(body))
+		mvc.perform(post("/api/patients").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors.fullName").exists())
 			.andExpect(jsonPath("$.errors.dateOfBirth").exists())
@@ -90,31 +91,31 @@ class PatientControllerTests {
 
 	@Test
 	void createWithUnknownGenderOrMalformedJsonReturns400() throws Exception {
-		mvc.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/patients").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content(VALID_PATIENT.replace("\"MALE\"", "\"ROBOT\"")))
 			.andExpect(status().isBadRequest());
-		mvc.perform(post("/api/patients").contentType(MediaType.APPLICATION_JSON).content("{not json"))
+		mvc.perform(post("/api/patients").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{not json"))
 			.andExpect(status().isBadRequest());
 	}
 
 	@Test
 	void listReturnsPatientsAndPassesSearch() throws Exception {
-		given(patientService.findAll("ale")).willReturn(List.of(patient(1L, "Alex Example")));
+		given(patientService.findAll("dan")).willReturn(List.of(patient(1L, "Daniel Okafor")));
 
-		mvc.perform(get("/api/patients").param("search", "ale"))
+		mvc.perform(get("/api/patients").param("search", "dan"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.length()").value(1))
-			.andExpect(jsonPath("$[0].fullName").value("Alex Example"));
+			.andExpect(jsonPath("$[0].fullName").value("Daniel Okafor"));
 	}
 
 	@Test
 	void getReturnsPatient() throws Exception {
-		given(patientService.findById(1L)).willReturn(patient(1L, "Alex Example"));
+		given(patientService.findById(1L)).willReturn(patient(1L, "Daniel Okafor"));
 
 		mvc.perform(get("/api/patients/1"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.id").value(1))
-			.andExpect(jsonPath("$.email").value("alex@example.com"));
+			.andExpect(jsonPath("$.email").value("daniel@example.com"));
 	}
 
 	@Test
@@ -134,11 +135,11 @@ class PatientControllerTests {
 
 	@Test
 	void updateReturns200() throws Exception {
-		given(patientService.update(eq(1L), any(PatientRequest.class))).willReturn(patient(1L, "Alex Updated"));
+		given(patientService.update(eq(1L), any(PatientRequest.class))).willReturn(patient(1L, "Daniel Okafor-Updated"));
 
-		mvc.perform(put("/api/patients/1").contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
+		mvc.perform(put("/api/patients/1").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.fullName").value("Alex Updated"));
+			.andExpect(jsonPath("$.fullName").value("Daniel Okafor-Updated"));
 	}
 
 	@Test
@@ -146,28 +147,30 @@ class PatientControllerTests {
 		given(patientService.update(eq(99L), any(PatientRequest.class)))
 			.willThrow(new ResourceNotFoundException("Patient", 99L));
 
-		mvc.perform(put("/api/patients/99").contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
+		mvc.perform(put("/api/patients/99").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(VALID_PATIENT))
 			.andExpect(status().isNotFound());
 	}
 
 	@Test
 	void updateWithInvalidBodyReturns400() throws Exception {
-		mvc.perform(put("/api/patients/1").contentType(MediaType.APPLICATION_JSON).content("{\"fullName\": \"\"}"))
+		mvc.perform(put("/api/patients/1").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"fullName\": \"\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors.fullName").exists());
 	}
 
 	@Test
+	@WithMockUser(roles = "ADMIN")
 	void deleteReturns204() throws Exception {
-		mvc.perform(delete("/api/patients/1")).andExpect(status().isNoContent());
+		mvc.perform(delete("/api/patients/1").with(csrf())).andExpect(status().isNoContent());
 		verify(patientService).delete(1L);
 	}
 
 	@Test
+	@WithMockUser(roles = "ADMIN")
 	void deleteMissingPatientReturns404() throws Exception {
 		willThrow(new ResourceNotFoundException("Patient", 99L)).given(patientService).delete(99L);
 
-		mvc.perform(delete("/api/patients/99")).andExpect(status().isNotFound());
+		mvc.perform(delete("/api/patients/99").with(csrf())).andExpect(status().isNotFound());
 	}
 
 	@Test
@@ -182,7 +185,7 @@ class PatientControllerTests {
 
 	private static PatientResponse patient(Long id, String name) {
 		return new PatientResponse(id, name, LocalDate.of(1958, 4, 12), Gender.MALE, "+1 555 0101",
-				"alex@example.com", "1 Sample Street", Instant.parse("2026-01-01T00:00:00Z"),
+				"daniel@example.com", "14 Harbour Lane", Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2026-01-01T00:00:00Z"));
 	}
 

@@ -2,10 +2,12 @@ import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { patientsApi } from '../api/patients'
 import { Alert, Button, Card, EmptyState, ErrorAlert, inputClass, Loading, PageHeader, Table, td, th } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
 import { useAsync } from '../hooks/useAsync'
 import { ageInYears, formatDate, titleCase } from '../utils/format'
 
 export function PatientsPage() {
+  const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchInput, setSearchInput] = useState('')
@@ -64,7 +66,7 @@ export function PatientsPage() {
                       <td className={td}>{p.email ?? '—'}</td>
                       <td className={`${td} whitespace-nowrap text-right`}>
                         <Button variant="ghost" onClick={() => navigate(`/patients/${p.id}/edit`)}>Edit</Button>
-                        <Button variant="danger" className="ml-1" onClick={() => remove(p.id, p.fullName)}>Delete</Button>
+                        {isAdmin && <Button variant="danger" className="ml-1" onClick={() => remove(p.id, p.fullName)}>Delete</Button>}
                       </td>
                     </tr>
                   ))}

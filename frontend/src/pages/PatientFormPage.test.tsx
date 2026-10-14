@@ -37,14 +37,14 @@ describe('PatientFormPage', () => {
     expect(summary).toHaveTextContent('fullName: must not be blank')
     expect(summary).toHaveTextContent('dateOfBirth: must not be null')
     expect(summary).toHaveTextContent('gender: must not be null')
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ fullName: '', dateOfBirth: null, gender: null })
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body))).toEqual({ fullName: '', dateOfBirth: null, gender: null })
   })
 
   it('creates the patient and opens their page', async () => {
-    mockFetch({ 'POST /api/patients': { status: 201, body: { id: 12, fullName: 'Sam Sample' } } })
+    mockFetch({ 'POST /api/patients': { status: 201, body: { id: 12, fullName: 'Noah Bennett' } } })
     renderNewPatientForm()
 
-    await userEvent.type(screen.getByLabelText(/Full name/), 'Sam Sample')
+    await userEvent.type(screen.getByLabelText(/Full name/), 'Noah Bennett')
     await userEvent.type(screen.getByLabelText(/Date of birth/), '1985-03-14')
     await userEvent.selectOptions(screen.getByLabelText(/Gender/), 'FEMALE')
     await userEvent.click(screen.getByRole('button', { name: 'Save patient' }))

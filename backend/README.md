@@ -3,23 +3,27 @@
 Spring Boot backend for the educational CDSS prototype
 (synthetic data only — not for clinical use).
 
-**Status:** step D complete (see
-[`../docs/PROJECT_PLAN.md`](../docs/PROJECT_PLAN.md)).
-Implemented: local MySQL connection, Flyway migrations V1–V6, `GET /api/health`,
+**Status:** steps A–H implemented (login and roles; medications, allergies,
+safety check, rule management, follow-ups; user management); see
+[`../docs/PROJECT_PLAN.md`](../docs/PROJECT_PLAN.md).
+Implemented: local MySQL connection, Flyway migrations V1–V12, `GET /api/health`,
 patient CRUD, knowledge base (drugs, diseases, lab tests), patient clinical
 records (vital signs, lab results, conditions), JSON clinical rules with a
 plain-Java rule engine, clinical decisions with stored history, JSON error
-responses.
-**Not implemented yet:** login/users (step F).
+responses, session login with BCrypt passwords, `ADMIN`/`CLINICIAN` roles
+and CSRF protection.
 
 > **Educational prototype.** The sample rules are illustrative and not
 > clinically validated. A matched rule is a prompt for review, not a
 > diagnosis. See the safety notes in
 > [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §5.7.
 
-> **No login yet.** With the `dev` profile (the default for
-> `./mvnw spring-boot:run`) every `/api` endpoint is open, and the backend logs
-> a warning saying so. This is for local development only, until step F.
+> **Login required.** Every endpoint except `GET /api/health`,
+> `GET /api/auth/csrf` and `POST /api/auth/login` needs a logged-in user, and
+> every POST, PUT and DELETE needs the session's CSRF token. This is
+> sensible-defaults security for a local assignment, **not** production
+> security (no HTTPS, rate limiting or account lockout). Demo accounts:
+> [`../docs/DEMO.md`](../docs/DEMO.md).
 
 ## Stack
 
@@ -88,6 +92,14 @@ same one is then used in the `CREATE USER` statement above).
 | `CDSS_DB_NAME` | `cdss` | Database name |
 | `CDSS_DB_USERNAME` | *(required)* | MySQL user (`cdss_app`) |
 | `CDSS_DB_PASSWORD` | *(required)* | That user's password |
+| `CDSS_DEMO_ADMIN_PASSWORD` | *(empty)* | Password for the demo user `admin` (8–72 characters) |
+| `CDSS_DEMO_CLINICIAN_PASSWORD` | *(empty)* | Password for the demo user `clinician` (8–72 characters) |
+
+In the `dev` profile the backend creates the demo users `admin` and
+`clinician` at startup **if they don't exist yet**, with these passwords
+(stored as BCrypt hashes). An empty value means that user is not created. A
+user that already exists is never changed, so editing `.env` later does not
+change its password. See [`../docs/DEMO.md`](../docs/DEMO.md).
 
 The `dev` profile reads `../.env` automatically, and `./mvnw spring-boot:run`
 uses the `dev` profile by default (set in `pom.xml`). Real environment
@@ -103,16 +115,47 @@ cd backend
 (Windows: `mvnw.cmd spring-boot:run`)
 
 On startup Flyway applies the SQL files in `src/main/resources/db/migration`
-and Hibernate checks the tables. The backend stops with an error if it cannot
+(the first start after step F adds `V7__users.sql`, which only creates the
+`users` table), Hibernate checks the tables, and the demo users are created
+if missing. The log says which demo users were created, skipped or left
+unchanged; it never shows passwords. The backend stops with an error if it cannot
 reach MySQL — check MySQL is running and `.env` is correct.
+
+With the `dev` profile the backend listens on **`127.0.0.1:8080` only**
+(`server.address` in `application-dev.yml`), so other computers on your
+network cannot reach it; passwords and session cookies never leave this
+machine over plain HTTP. Other profiles do not set an address.
 
 Check it in another terminal (or a browser):
 
 ```bash
 curl -i http://localhost:8080/api/health
+lsof -nP -iTCP:8080 -sTCP:LISTEN     # macOS/Linux: should show 127.0.0.1:8080, not *:8080
 ```
 
 Stop the backend with `Ctrl+C`.
+
+### HTTP now, HTTPS later
+
+Local development uses plain HTTP, so the session cookie is **not** marked
+`Secure` (browsers would not store a `Secure` cookie received over HTTP,
+except some for `localhost`). The project has no HTTPS or production
+deployment and is **not production-ready**. If it were ever served over
+HTTPS, the configuration for that deployment (not the `dev` profile) would
+need at least:
+
+```yaml
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true                  # the session cookie is only sent over HTTPS
+  forward-headers-strategy: native    # only if a reverse proxy terminates HTTPS
+```
+
+`HttpOnly`, `SameSite=Strict` and the CSRF tokens stay as they are. Spring
+Security adds the HSTS header automatically on HTTPS requests. Login attempts
+are **not rate-limited** (see [`../docs/DEMO.md`](../docs/DEMO.md) §5).
 
 ### Health endpoint
 
@@ -131,7 +174,7 @@ Stop the backend with `Ctrl+C`.
 | Database reachable | 200 | `UP` | `UP` |
 | Database lost while running | 503 | `DEGRADED` | `DOWN` |
 
-Without the `dev` profile, every other path returns `401 Unauthorized`.
+Every other endpoint answers `401 Unauthorized` until you log in.
 
 ### Troubleshooting
 
@@ -160,9 +203,45 @@ All endpoints use JSON. Errors use one format (RFC 9457 Problem Details):
 | 201 Created | Record created; `Location` header has its URL |
 | 204 No Content | Record deleted |
 | 400 Bad Request | Invalid fields (`errors` lists them), malformed JSON, or a non-numeric ID |
+| 401 Unauthorized | Not logged in, session ended, or wrong username/password at login |
+| 403 Forbidden | Your role may not do this (`ADMIN` only), or the CSRF token is missing/wrong (`"code": "CSRF"`) |
 | 404 Not Found | No record with that ID, or unknown URL |
 | 409 Conflict | Duplicate drug (name + dosage), disease (ICD-10 code) or lab test (name) |
 | 500 | Unexpected error; generic message only, details in the server log |
+
+### Login, logout and CSRF — `/api/auth`
+
+| Method | Path | Who | Result |
+|--------|------|-----|--------|
+| GET | `/api/auth/csrf` | anyone | `{"headerName": "X-CSRF-TOKEN", "token": "…"}` for this session |
+| POST | `/api/auth/login` | anyone (with CSRF token) | `{"username", "role"}`; 401 `Invalid username or password` |
+| GET | `/api/auth/me` | logged in | The current user; 401 if not logged in |
+| POST | `/api/auth/logout` | anyone (with CSRF token) | 204; the session ends |
+
+Login replaces the session ID and the CSRF token, and logout ends the
+session, so fetch `/api/auth/csrf` again after each. Roles: `ADMIN` may do
+everything; `CLINICIAN` may do everything except delete patients and change
+drugs, diseases, lab tests or rules (see
+[`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §6).
+
+To try the API with curl, keep the session cookie in a temporary file and
+send the token on every change (the examples below use the `api` helper):
+
+```bash
+COOKIES=$(mktemp)
+csrf() { curl -s -b "$COOKIES" -c "$COOKIES" http://localhost:8080/api/auth/csrf | sed -E 's/.*"token":"([^"]+)".*/\1/'; }
+api() { curl -b "$COOKIES" -c "$COOKIES" -H "X-CSRF-TOKEN: $TOKEN" "$@"; }
+
+TOKEN=$(csrf)
+printf 'Password for clinician: '; read -rs PASSWORD; echo   # typed, not saved in shell history
+api -i -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"clinician\",\"password\":\"$PASSWORD\"}"
+TOKEN=$(csrf)   # login replaced the token
+api http://localhost:8080/api/auth/me
+```
+
+Log in as `admin` instead for the knowledge-base and rule examples. When
+finished: `api -X POST http://localhost:8080/api/auth/logout; rm "$COOKIES"`.
 
 ### Patients — `/api/patients`
 
@@ -173,7 +252,7 @@ All endpoints use JSON. Errors use one format (RFC 9457 Problem Details):
 | GET | `/api/patients/{id}` | One patient |
 | POST | `/api/patients` | Create → 201 |
 | PUT | `/api/patients/{id}` | Replace all fields → 200 |
-| DELETE | `/api/patients/{id}` | Delete → 204 |
+| DELETE | `/api/patients/{id}` | Delete → 204 (`ADMIN` only) |
 
 Fields: `fullName` (required), `dateOfBirth` (required, `YYYY-MM-DD`, not in
 the future), `gender` (required: `MALE`, `FEMALE`, `OTHER`, `UNKNOWN`),
@@ -181,23 +260,24 @@ the future), `gender` (required: `MALE`, `FEMALE`, `OTHER`, `UNKNOWN`),
 `createdAt`, `updatedAt`.
 
 ```bash
-curl -i -X POST http://localhost:8080/api/patients \
+api -i -X POST http://localhost:8080/api/patients \
   -H 'Content-Type: application/json' \
-  -d '{"fullName":"Sam Sample","dateOfBirth":"1985-03-14","gender":"FEMALE",
-       "phone":"+1 555 0150","email":"sam.sample@example.com","address":"5 Demo Avenue"}'
+  -d '{"fullName":"Noah Bennett","dateOfBirth":"1985-03-14","gender":"FEMALE",
+       "phone":"+1 555 0150","email":"noah.bennett@example.com","address":"5 Birch Row, Northbridge"}'
 
-curl http://localhost:8080/api/patients/1
+api http://localhost:8080/api/patients/1
 
-curl -i -X PUT http://localhost:8080/api/patients/1 \
+api -i -X PUT http://localhost:8080/api/patients/1 \
   -H 'Content-Type: application/json' \
-  -d '{"fullName":"Alex Example","dateOfBirth":"1958-04-12","gender":"MALE","phone":"+1 555 0111"}'
+  -d '{"fullName":"Daniel Okafor","dateOfBirth":"1958-04-12","gender":"MALE","phone":"+1 555 0111"}'
 
-curl -i -X DELETE http://localhost:8080/api/patients/1
+api -i -X DELETE http://localhost:8080/api/patients/1
 ```
 
 ### Knowledge base — `/api/drugs`, `/api/diseases`, `/api/lab-tests`
 
 Each supports `GET` (list), `GET /{id}`, `POST`, `PUT /{id}`, `DELETE /{id}`.
+Reading is open to both roles; `POST`, `PUT` and `DELETE` are `ADMIN` only.
 
 | Resource | Fields (* = required) | Must be unique |
 |----------|-----------------------|----------------|
@@ -208,19 +288,19 @@ Each supports `GET` (list), `GET /{id}`, `POST`, `PUT /{id}`, `DELETE /{id}`.
 Uniqueness ignores upper/lower case.
 
 ```bash
-curl -i -X POST http://localhost:8080/api/drugs \
+api -i -X POST http://localhost:8080/api/drugs \
   -H 'Content-Type: application/json' \
   -d '{"name":"Atorvastatin","dosage":"20 mg","category":"Statin"}'
 
-curl -i -X POST http://localhost:8080/api/diseases \
+api -i -X POST http://localhost:8080/api/diseases \
   -H 'Content-Type: application/json' \
   -d '{"name":"Hyperlipidaemia, unspecified","icd10Code":"E78.5"}'
 
-curl -i -X POST http://localhost:8080/api/lab-tests \
+api -i -X POST http://localhost:8080/api/lab-tests \
   -H 'Content-Type: application/json' \
   -d '{"name":"Sodium","referenceRangeLow":135,"referenceRangeHigh":145,"unit":"mmol/L"}'
 
-curl http://localhost:8080/api/lab-tests
+api http://localhost:8080/api/lab-tests
 ```
 
 ### Clinical records — `/api/patients/{id}/vital-signs`, `/lab-results`, `/conditions`
@@ -235,17 +315,17 @@ cannot be edited; delete and re-add instead. A missing patient gives 404.
 | Condition | `diseaseId`*, `status` (`ACTIVE` default, `RESOLVED`), `onsetDate`, `notes` | Disease must exist (400); once per patient (409). Only ACTIVE conditions are used by rules. |
 
 ```bash
-curl -i -X POST http://localhost:8080/api/patients/1/vital-signs \
+api -i -X POST http://localhost:8080/api/patients/1/vital-signs \
   -H 'Content-Type: application/json' \
   -d '{"recordedAt":"2026-10-13T09:30:00Z","systolicBp":152,"diastolicBp":96,
        "temperature":38.6,"heartRate":118,"respiratoryRate":24,"oxygenSaturation":90}'
 
-# lab test ids: curl http://localhost:8080/api/lab-tests
-curl -i -X POST http://localhost:8080/api/patients/1/lab-results \
+# lab test ids: api http://localhost:8080/api/lab-tests
+api -i -X POST http://localhost:8080/api/patients/1/lab-results \
   -H 'Content-Type: application/json' \
   -d '{"labTestId":2,"value":8.2,"unit":"mmol/L","measuredAt":"2026-10-13T08:00:00Z"}'
 
-curl -i -X POST http://localhost:8080/api/patients/1/conditions \
+api -i -X POST http://localhost:8080/api/patients/1/conditions \
   -H 'Content-Type: application/json' -d '{"diseaseId":1,"status":"ACTIVE"}'
 ```
 
@@ -256,9 +336,10 @@ cannot be deleted (409).
 
 | Method | Path | Result |
 |--------|------|--------|
-| GET | `/api/rules` | All rules, priority order (1 = most important) |
-| GET | `/api/rules/{id}` | One rule |
-| GET | `/api/rules/facts` | Facts and operators a condition may use |
+| GET | `/api/rules/summaries` | **Any logged-in user:** rules in plain English, without JSON |
+| GET | `/api/rules` | ADMIN: all rules with JSON, priority order (1 = most important), `valid` flag |
+| GET | `/api/rules/{id}` | ADMIN: one rule |
+| GET | `/api/rules/facts` | ADMIN: facts and operators a condition may use |
 | POST | `/api/rules/validate` | Check a rule without saving → 200 `{"valid": false, "errors": [...]}` |
 | POST | `/api/rules` | Create → 201; invalid rule → 400 with every problem; duplicate `ruleId` → 409 |
 | PUT | `/api/rules/{id}` | Replace → 200 (set `"enabled": false` to switch a rule off) |
@@ -269,7 +350,7 @@ data, validation) is in [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §5
 A small example:
 
 ```bash
-curl -i -X POST http://localhost:8080/api/rules \
+api -i -X POST http://localhost:8080/api/rules \
   -H 'Content-Type: application/json' \
   -d '{"ruleId":"HR-LOW","name":"Bradycardia","description":"Educational example.",
        "severity":"MEDIUM","priority":35,
@@ -293,7 +374,7 @@ An invalid rule returns, for example:
 | GET | `/api/patients/{id}/decisions/{decisionId}` | One decision |
 
 ```bash
-curl -i -X POST http://localhost:8080/api/patients/1/decisions
+api -i -X POST http://localhost:8080/api/patients/1/decisions
 ```
 
 Example response (shortened):
@@ -330,6 +411,52 @@ Example response (shortened):
 - **`invalidRules`** lists stored rules that no longer pass validation (for
   example, a lab test was renamed). They are skipped and the rest still run.
 
+### Medications, allergies and the safety check — `/api/patients/{id}/medications`, `/allergies`
+
+Any logged-in user. Nothing here is ever deleted: medications are
+discontinued or completed, allergies resolved.
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/medications`, `/medications/{medicationId}` | All courses (active and history) / one |
+| POST | `/medications/safety-check` `{"drugId": 5}` | Structured check, nothing saved |
+| POST | `/medications` | 201; **409** `SAFETY_ACKNOWLEDGEMENT_REQUIRED` (with the check) unless every finding that needs review is listed in `acknowledgedWarnings` and `overrideReason` is given; 409 if the drug is already active |
+| PUT | `/medications/{medicationId}` | Edit dose, unit, route, frequency, dates, notes (ACTIVE only) |
+| POST | `/medications/{medicationId}/discontinue` `{"reason": …}` / `/complete` | Ends the course; kept as history |
+| GET | `/allergies` | `{assessment, assessmentExplanation, …, allergies}` — `NOT_ASSESSED` is not "no allergies" |
+| POST | `/allergies`, `PUT /allergies/{allergyId}`, `POST /allergies/{allergyId}/resolve` `{"reason": …}` | Record / edit / resolve |
+| POST | `/allergies/no-known-allergies` | Confirms NKA; 409 while an allergy is active |
+| GET | `/api/drug-interactions` | The interaction dataset (**2 illustrative sample rows**) |
+
+```bash
+api -i -X POST http://localhost:8080/api/patients/1/medications/safety-check \
+  -H 'Content-Type: application/json' -d '{"drugId":5}'
+```
+
+### Follow-ups — `/api/follow-ups`, `/api/patients/{id}/follow-ups`
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/api/follow-ups` | All patients, earliest first, each with `timing` (OVERDUE, UPCOMING within 7 days, LATER, COMPLETED, CANCELLED) calculated now |
+| GET / POST | `/api/patients/{id}/follow-ups` | List / schedule `{"scheduledAt": "2026-10-20T09:00:00Z", "reason": "BP review"}` (must be in the future) |
+| POST | `/api/patients/{id}/follow-ups/{followUpId}/reschedule` `{"scheduledAt": …}` / `/complete` `{"notes": …}` / `/cancel` `{"notes": reason}` | SCHEDULED only |
+
+### User management — `/api/admin/users` (ADMIN)
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/api/admin/users` | `[{id, username, role, enabled, createdAt}]` — never passwords or hashes |
+| POST | `/api/admin/users` `{"username", "password", "role"}` | 201; 409 if the username exists |
+| POST | `/api/admin/users/{id}/activate` / `deactivate` | Deactivation ends the user's sessions; 409 for yourself or the last active admin |
+| PUT | `/api/admin/users/{id}/role` `{"role": "ADMIN"}` | Ends the user's sessions; 409 for yourself or the last active admin |
+
+### Rule management additions (ADMIN)
+
+`POST /api/rules/{id}/activate` (validates first; 400 with the problems if
+invalid), `POST /api/rules/{id}/deactivate` (always works), and
+`POST /api/rules/dry-run` `{"patientId": 1, "condition": {…}}` (evaluates
+without saving anything).
+
 ### Sample data
 
 Migration `V3__sample_data.sql` adds 4 fictional patients, 5 drugs, 5
@@ -338,10 +465,20 @@ reference ranges are educational examples only**. They are not prescribing
 guidance, and must be checked against a local formulary and laboratory before
 any real use. Their `notes` field says so.
 
+Migration `V11__rename_seed_patients.sql` renames those four synthetic
+patients from placeholder names to plausible fictional names (Daniel Okafor,
+Priya Raman, Sam Lindqvist, Emma Castillo). It changes a row only if it still
+has exactly its seeded values, keeps patient IDs (so all linked records stay
+attached) and changes no clinical data.
+
+Migration `V9__drug_interactions.sql` adds two **illustrative sample**
+interactions (Warfarin + Ibuprofen, Lisinopril + Ibuprofen), labelled as not
+clinically reviewed and not from a licensed source.
+
 Migration `V6__sample_rules.sql` adds five **illustrative** rules
 (`SEPSIS-SCREEN`, `SPO2-LOW`, `HR-HIGH`, `BP-HIGH`, `GLUCOSE-HIGH`; see
 [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) §5.7). It also adds
-sample conditions for Alex Example (I10, E11.9) and Jordan Sample (J18.9,
+sample conditions for Daniel Okafor (I10, E11.9) and Priya Raman (J18.9,
 resolved). No vital signs or lab results are seeded, so record some before
 requesting a decision.
 
@@ -355,10 +492,13 @@ CDSS_MYSQL_IT=true ./mvnw test -Dtest=MySqlIntegrationTests   # only the MySQL t
 ```
 
 Expected result of `./mvnw test`:
-`Tests run: 152, Failures: 0, Errors: 0, Skipped: 7`. The 7 skipped are
+`Tests run: 491, Failures: 0, Errors: 0, Skipped: 9`. The 9 skipped are
 the MySQL integration tests, which only run when `CDSS_MYSQL_IT=true`. They
-use your local `cdss` database through the `dev` profile, and each test is
-rolled back, so they leave no data behind.
+use your local `cdss` **development** database through the `dev` profile
+(there is no separate test database): Flyway applies any pending migration
+to it when they start, and each test is rolled back, so they leave no test
+data behind. They never create demo users. They run as an `ADMIN`; the role
+rules are covered by `SecurityConfigTests`.
 
 | Test class | What it checks | Needs MySQL |
 |------------|----------------|:-----------:|
@@ -372,11 +512,19 @@ rolled back, so they leave no data behind.
 | `controller.ClinicalRecordControllerTests` | 201/400/404/409; implausible vital signs; blood pressure rules; future timestamps | No |
 | `controller.ClinicalRuleControllerTests` | 201; 400 with rule errors; missing fields; validate; facts; 404; 409 | No |
 | `controller.DecisionControllerTests` | 201 with reasons/actions/disclaimer; no-match result; 404; bad ID; history | No |
-| `ApplicationConfigurationTests` | `ddl-auto=validate`, env-only credentials, safe errors, decision age limits, open API only in `dev` | No |
-| `config.SecurityConfigTests` | `/api` 401 by default; open when `cdss.security.open-api=true` | No |
+| `ApplicationConfigurationTests` | `ddl-auto=validate`, env-only credentials (incl. demo passwords), safe errors, decision age limits, no open API, HttpOnly + SameSite=Strict session cookie, not `Secure` (local HTTP), only the `dev` profile binds to `127.0.0.1` | No |
+| `config.SecurityConfigTests` | Every endpoint: 401 without login, 403 for a clinician on `ADMIN` endpoints, allowed for the right roles; public endpoints; CSRF required on changes, login and logout | No |
+| `service.MedicationSafetyCheckerTests` | Allergy match across strengths, category match, similar names not matched, free-text → uncertain, not-assessed → uncertain, interaction either order (labelled sample), no match never "safe", duplicate therapy, source details copied never invented, fingerprint changes only on material change, dataset unavailable → uncertain, drug not covered, priority order | No |
+| `service.MedicationServiceTests`, `AllergyServiceTests`, `FollowUpServiceTests` | Create/validate/duplicates/404; acknowledgement enforced and stored; discontinue keeps history; NKA vs not assessed; follow-up timing at the boundaries; status transitions | No |
+| `controller.PatientSafetyRecordControllerTests`, `FollowUpControllerTests` | 201/400/404/409 (incl. 409 with the safety check), validation of enums and dates | No |
+| `service.UserAdminServiceTests`, `controller.UserAdminControllerTests` | BCrypt hash on create, duplicates, no password data in responses, self/last-admin guards, sessions expired on deactivation, validation, clinicians refused | No |
+| `ruleengine.RuleDescriberTests` | Plain-English rule summaries (units, groups, NOT, codes) | No |
+| `ruleengine.DrugInteractionSampleDataTests` | Every V9 row is labelled illustrative/unreviewed and names existing sample drugs | No |
+| `controller.AuthControllerTests` | Login success (new session ID), same 401 for wrong password / unknown / disabled user, over-long password, 400, `/me`, old CSRF token rejected after login, logout ends the session | No |
+| `service.UserAccountServiceTests`, `service.DemoUserInitializerTests` | Account lookup and roles; demo users created with BCrypt hashes, existing users never changed, missing/short/long passwords refused | No |
 | `controller.HealthControllerTests`, `PatientControllerTests`, `KnowledgeBaseControllerTests` | Health, patient and knowledge-base endpoints | No |
 | `service.PatientServiceTests`, `KnowledgeBaseServiceTests`, `DatabaseHealthCheckerTests` | Patient/knowledge-base logic (incl. in-use deletes), health check | No |
-| `MySqlIntegrationTests` | Real MySQL: migrations applied; all sample rules valid; abnormal values trigger all five rules; normal values match none; stale data ignored; cascade delete; in-use lab test; rule JSON stored | **Yes** (opt-in) |
+| `MySqlIntegrationTests` | Real MySQL: migrations applied; stored user logs in with BCrypt password; all sample rules valid; abnormal values trigger all five rules; normal values match none; stale data ignored; cascade delete; in-use lab test; rule JSON stored | **Yes** (opt-in) |
 
 ## Layout
 
@@ -387,8 +535,8 @@ backend/
 └── src/
     ├── main/java/com/cdss/
     │   ├── CdssApplication.java
-    │   ├── config/        # SecurityConfig, TimeConfig (UTC Clock), DecisionProperties
-    │   ├── controller/    # REST endpoints (patients, knowledge base, records, rules, decisions, health)
+    │   ├── config/        # SecurityConfig (URL rules, CSRF), AuthenticationConfig (BCrypt), TimeConfig, DecisionProperties
+    │   ├── controller/    # REST endpoints (auth, patients, knowledge base, records, rules, decisions, health)
     │   ├── service/       # business logic
     │   ├── repository/    # Spring Data JPA interfaces
     │   ├── entity/        # JPA entities and enums
@@ -397,8 +545,8 @@ backend/
     │   └── exception/     # GlobalExceptionHandler + custom exceptions
     ├── main/resources/
     │   ├── application.yml             # base config (env vars, decision age limits)
-    │   ├── application-dev.yml         # dev profile: imports ../.env, open API
-    │   └── db/migration/               # V1–V6 (see ../docs/ARCHITECTURE.md §4)
+    │   ├── application-dev.yml         # dev profile: imports ../.env, demo-user passwords
+    │   └── db/migration/               # V1–V12 (see ../docs/ARCHITECTURE.md §4)
     └── test/java/com/cdss/             # mirrors the main packages
 ```
 

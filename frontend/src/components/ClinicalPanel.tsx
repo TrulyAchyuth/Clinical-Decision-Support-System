@@ -8,18 +8,26 @@ import { useAsync } from '../hooks/useAsync'
 import {
   dateTimeInputToIso, formatDate, formatDateTime, nowForDateTimeInput, optionalNumber, optionalText, titleCase,
 } from '../utils/format'
+import { AllergiesTab } from './AllergiesTab'
 import { DecisionResult } from './DecisionResult'
+import { FollowUpsTab } from './FollowUps'
+import { MedicationsTab } from './MedicationsTab'
 import { Alert, Badge, Button, Card, EmptyState, ErrorAlert, Field, inputClass, Loading, Table, td, th } from './ui'
 
-export type ClinicalTab = 'decision' | 'vitals' | 'labs' | 'conditions' | 'history'
+export type ClinicalTab = 'decision' | 'vitals' | 'labs' | 'conditions' | 'medications' | 'allergies' | 'follow-ups' | 'history'
 
 const tabs: { id: ClinicalTab; label: string }[] = [
   { id: 'decision', label: 'Request decision' },
   { id: 'vitals', label: 'Vital signs' },
   { id: 'labs', label: 'Lab results' },
   { id: 'conditions', label: 'Conditions' },
+  { id: 'medications', label: 'Medications' },
+  { id: 'allergies', label: 'Allergies' },
+  { id: 'follow-ups', label: 'Follow-ups' },
   { id: 'history', label: 'Decision history' },
 ]
+
+export const clinicalTabs: readonly ClinicalTab[] = tabs.map((t) => t.id)
 
 /** Everything clinical about one patient: observations, history and decisions. */
 export function ClinicalPanel({ patientId, initialTab = 'decision' }: { patientId: number; initialTab?: ClinicalTab }) {
@@ -44,6 +52,9 @@ export function ClinicalPanel({ patientId, initialTab = 'decision' }: { patientI
       {tab === 'vitals' && <VitalSignsTab patientId={patientId} />}
       {tab === 'labs' && <LabResultsTab patientId={patientId} />}
       {tab === 'conditions' && <ConditionsTab patientId={patientId} />}
+      {tab === 'medications' && <MedicationsTab patientId={patientId} />}
+      {tab === 'allergies' && <AllergiesTab patientId={patientId} />}
+      {tab === 'follow-ups' && <FollowUpsTab patientId={patientId} />}
       {tab === 'history' && <HistoryTab patientId={patientId} />}
     </Card>
   )
@@ -299,7 +310,7 @@ function LabResultsTab({ patientId }: { patientId: number }) {
             </select>
           </Field>
           <Field label={`Value${selected ? ` (${selected.unit})` : ''}`} htmlFor="l-value" required error={fieldErrors.value}
-            hint={selected ? `Educational reference range ${selected.referenceRangeLow}–${selected.referenceRangeHigh} ${selected.unit}` : undefined}>
+            hint={selected ? `Reference range ${selected.referenceRangeLow}–${selected.referenceRangeHigh} ${selected.unit}` : undefined}>
             <input id="l-value" type="number" step="0.01" inputMode="decimal" className={inputClass} value={value} onChange={(e) => setValue(e.target.value)} required />
           </Field>
           <Field label="Measured at" htmlFor="l-time" required error={fieldErrors.measuredAt}>
@@ -318,7 +329,7 @@ function LabResultsTab({ patientId }: { patientId: number }) {
           <Table>
             <thead><tr>
               <th className={th}>Measured</th><th className={th}>Lab test</th><th className={th}>Value</th>
-              <th className={th}>Flag</th><th className={th}>Reference range (educational)</th><th className={th}>Notes</th><th className={th}></th>
+              <th className={th}>Flag</th><th className={th}>Reference range</th><th className={th}>Notes</th><th className={th}></th>
             </tr></thead>
             <tbody>
               {list.data.map((r) => (

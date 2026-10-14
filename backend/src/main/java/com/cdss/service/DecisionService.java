@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cdss.dto.DecisionResponse;
+import com.cdss.dto.RuleDryRunRequest;
+import com.cdss.dto.RuleDryRunResponse;
 import com.cdss.entity.ClinicalDecision;
 import com.cdss.entity.ClinicalRule;
 import com.cdss.entity.DecisionOutcome;
@@ -105,6 +107,35 @@ public class DecisionService {
 		return decisionRepository.findByIdAndPatientId(decisionId, patientId)
 			.map(DecisionResponse::from)
 			.orElseThrow(() -> new ResourceNotFoundException("Decision", decisionId));
+	}
+
+	/** Evaluates a condition that is not saved against a patient's data now. Nothing is stored. */
+	@Transactional(readOnly = true)
+	public RuleDryRunResponse dryRun(RuleDryRunRequest request) {
+		Patient patient = getPatient(request.patientId());
+		Instant now = clock.instant();
+		FactCatalog catalog = ruleService.factCatalog();
+		Condition condition;
+		try {
+			condition = new RuleParser(catalog).parse(request.condition());
+		}
+		catch (RuleValidationException ex) {
+			return new RuleDryRunResponse(patient.getId(), false, ex.getErrors(), null, List.of(), now,
+					RuleDryRunResponse.NOTE);
+		}
+		Evaluation evaluation = evaluator.evaluate(condition, factsService.collect(patient, now));
+		if (evaluation.truth() == Truth.UNKNOWN) {
+			List<String> missing = evaluation.missingFacts()
+				.stream()
+				.sorted()
+				.map((name) -> catalog.find(name).map(factsService::describeMissing).orElse("No value for " + name))
+				.toList();
+			return new RuleDryRunResponse(patient.getId(), true, List.of(), "INSUFFICIENT_DATA", missing, now,
+					RuleDryRunResponse.NOTE);
+		}
+		return new RuleDryRunResponse(patient.getId(), true, List.of(),
+				evaluation.truth() == Truth.TRUE ? "MATCHED" : "NOT_MATCHED", evaluation.reasons(), now,
+				RuleDryRunResponse.NOTE);
 	}
 
 	/** Returns the stored result for this rule, or null if it was evaluated and did not match. */

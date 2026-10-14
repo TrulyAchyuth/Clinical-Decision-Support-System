@@ -5,7 +5,7 @@ spring:
     name: cdss-backend
   autoconfigure:
     # No default in-memory user (whose generated password would be logged);
-    # real user accounts are added in Phase 3.
+    # accounts live in the users table (V7).
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   datasource:
     url: jdbc:mysql://${CDSS_DB_HOST:localhost}:${CDSS_DB_PORT:3306}/${CDSS_DB_NAME:cdss}
@@ -34,6 +34,15 @@ spring:
       enabled: true
 
 server:
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        # JavaScript cannot read the session cookie, and browsers do not send
+        # it on requests started by other sites. "secure" stays off because
+        # local development uses plain HTTP; turn it on behind HTTPS.
+        http-only: true
+        same-site: strict
   error:
     include-message: never
     include-stacktrace: never
@@ -45,3 +54,7 @@ cdss:
     # report the data as missing instead of relying on stale values.
     vital-signs-max-age: 24h
     lab-results-max-age: 72h
+  follow-ups:
+    # A scheduled follow-up due within this time is listed as "upcoming"; one
+    # whose time has passed is "overdue". Calculated when the list is read.
+    upcoming-window: 7d

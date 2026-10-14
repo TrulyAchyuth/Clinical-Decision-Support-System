@@ -3,11 +3,13 @@ import { ApiError } from '../api/client'
 import { diseasesApi } from '../api/knowledgeBase'
 import type { Disease } from '../api/types'
 import { Alert, Button, Card, EmptyState, ErrorAlert, Field, inputClass, Loading, PageHeader, Table, td, th } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
 import { useAsync } from '../hooks/useAsync'
 
 const empty = { name: '', icd10Code: '' }
 
 export function DiseasesPage() {
+  const { isAdmin } = useAuth()
   const diseases = useAsync(() => diseasesApi.list(), [])
   const [editing, setEditing] = useState<Disease | 'new' | null>(null)
   const [form, setForm] = useState(empty)
@@ -54,7 +56,8 @@ export function DiseasesPage() {
   return (
     <>
       <PageHeader title="Diseases" description="Knowledge base of diseases with ICD-10 codes. Used for patient conditions and rules."
-        actions={<Button onClick={() => open('new')}>Add disease</Button>} />
+        actions={isAdmin && <Button onClick={() => open('new')}>Add disease</Button>} />
+      {!isAdmin && <Alert kind="info">Read-only: only administrators can change the knowledge base.</Alert>}
       {message && <Alert kind="success" onDismiss={() => setMessage(undefined)}>{message}</Alert>}
       {error !== undefined && !editing && <ErrorAlert error={error} onDismiss={() => setError(undefined)} />}
 
@@ -89,8 +92,10 @@ export function DiseasesPage() {
                     <td className={`${td} font-mono`}>{disease.icd10Code}</td>
                     <td className={`${td} font-medium text-slate-900`}>{disease.name}</td>
                     <td className={`${td} whitespace-nowrap text-right`}>
-                      <Button variant="ghost" onClick={() => open(disease)}>Edit</Button>
-                      <Button variant="danger" className="ml-1" onClick={() => remove(disease)}>Delete</Button>
+                      {isAdmin && <>
+                        <Button variant="ghost" onClick={() => open(disease)}>Edit</Button>
+                        <Button variant="danger" className="ml-1" onClick={() => remove(disease)}>Delete</Button>
+                      </>}
                     </td>
                   </tr>
                 ))}

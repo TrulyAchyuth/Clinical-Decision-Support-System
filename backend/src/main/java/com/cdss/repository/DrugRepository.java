@@ -14,4 +14,6 @@ public interface DrugRepository extends JpaRepository<Drug, Long> {
 
 	boolean existsByNameIgnoreCaseAndDosageIgnoreCaseAndIdNot(String name, String dosage, Long id);
 
+	boolean existsByCategoryIgnoreCase(String category);
+
 }

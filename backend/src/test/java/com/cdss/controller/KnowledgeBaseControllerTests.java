@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -40,7 +41,7 @@ import com.cdss.service.LabTestService;
 
 @WebMvcTest({ DrugController.class, DiseaseController.class, LabTestController.class })
 @Import(SecurityConfig.class)
-@WithMockUser
+@WithMockUser(roles = "ADMIN")
 class KnowledgeBaseControllerTests {
 
 	@Autowired
@@ -62,7 +63,7 @@ class KnowledgeBaseControllerTests {
 		given(drugService.create(any(DrugRequest.class)))
 			.willReturn(new DrugResponse(3L, "Amoxicillin", "500 mg", "Antibiotic", null));
 
-		mvc.perform(post("/api/drugs").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/drugs").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Amoxicillin\", \"dosage\": \"500 mg\", \"category\": \"Antibiotic\"}"))
 			.andExpect(status().isCreated())
 			.andExpect(header().string("Location", "http://localhost/api/drugs/3"))
@@ -74,7 +75,7 @@ class KnowledgeBaseControllerTests {
 		given(drugService.create(any(DrugRequest.class)))
 			.willThrow(new DuplicateResourceException("A drug named 'Amoxicillin' with dosage '500 mg' already exists"));
 
-		mvc.perform(post("/api/drugs").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/drugs").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Amoxicillin\", \"dosage\": \"500 mg\", \"category\": \"Antibiotic\"}"))
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.detail").value("A drug named 'Amoxicillin' with dosage '500 mg' already exists"));
@@ -82,7 +83,7 @@ class KnowledgeBaseControllerTests {
 
 	@Test
 	void createDrugWithMissingFieldsReturns400() throws Exception {
-		mvc.perform(post("/api/drugs").contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"X\"}"))
+		mvc.perform(post("/api/drugs").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"X\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors.dosage").exists())
 			.andExpect(jsonPath("$.errors.category").exists());
@@ -97,10 +98,10 @@ class KnowledgeBaseControllerTests {
 
 		mvc.perform(get("/api/drugs")).andExpect(status().isOk()).andExpect(jsonPath("$[0].name").value("Lisinopril"));
 		mvc.perform(get("/api/drugs/1")).andExpect(status().isOk()).andExpect(jsonPath("$.category").value("ACE inhibitor"));
-		mvc.perform(put("/api/drugs/1").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(put("/api/drugs/1").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Lisinopril\", \"dosage\": \"10 mg\", \"category\": \"ACE inhibitor\"}"))
 			.andExpect(status().isOk());
-		mvc.perform(delete("/api/drugs/1")).andExpect(status().isNoContent());
+		mvc.perform(delete("/api/drugs/1").with(csrf())).andExpect(status().isNoContent());
 		verify(drugService).delete(1L);
 	}
 
@@ -110,7 +111,7 @@ class KnowledgeBaseControllerTests {
 		willThrow(new ResourceNotFoundException("Drug", 42L)).given(drugService).delete(42L);
 
 		mvc.perform(get("/api/drugs/42")).andExpect(status().isNotFound());
-		mvc.perform(delete("/api/drugs/42")).andExpect(status().isNotFound());
+		mvc.perform(delete("/api/drugs/42").with(csrf())).andExpect(status().isNotFound());
 	}
 
 	// ---- diseases ----
@@ -120,7 +121,7 @@ class KnowledgeBaseControllerTests {
 		given(diseaseService.create(any(DiseaseRequest.class)))
 			.willReturn(new DiseaseResponse(5L, "Essential (primary) hypertension", "I10"));
 
-		mvc.perform(post("/api/diseases").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/diseases").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Essential (primary) hypertension\", \"icd10Code\": \"i10\"}"))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.icd10Code").value("I10"));
@@ -128,7 +129,7 @@ class KnowledgeBaseControllerTests {
 
 	@Test
 	void createDiseaseWithInvalidIcd10CodeReturns400() throws Exception {
-		mvc.perform(post("/api/diseases").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(post("/api/diseases").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Something\", \"icd10Code\": \"12345\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors.icd10Code").value("must be an ICD-10 code such as I10 or E11.9"));
@@ -139,7 +140,7 @@ class KnowledgeBaseControllerTests {
 		given(diseaseService.update(eq(1L), any(DiseaseRequest.class)))
 			.willThrow(new DuplicateResourceException("A disease with ICD-10 code 'I10' already exists"));
 
-		mvc.perform(put("/api/diseases/1").contentType(MediaType.APPLICATION_JSON)
+		mvc.perform(put("/api/diseases/1").with(csrf()).contentType(MediaType.APPLICATION_JSON)
 				.content("{\"name\": \"Hypertension\", \"icd10Code\": \"I10\"}"))
 			.andExpect(status().isConflict());
 	}
@@ -160,7 +161,7 @@ class KnowledgeBaseControllerTests {
 		given(labTestService.create(any(LabTestRequest.class))).willReturn(
 				new LabTestResponse(2L, "Potassium", new BigDecimal("3.50"), new BigDecimal("5.10"), "mmol/L", null));
 
-		mvc.perform(post("/api/lab-tests").contentType(MediaType.APPLICATION_JSON).content("""
+		mvc.perform(post("/api/lab-tests").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("""
 				{"name": "Potassium", "referenceRangeLow": 3.5, "referenceRangeHigh": 5.1, "unit": "mmol/L"}
 				"""))
 			.andExpect(status().isCreated())
@@ -170,7 +171,7 @@ class KnowledgeBaseControllerTests {
 
 	@Test
 	void labTestWithLowAboveHighReturns400() throws Exception {
-		mvc.perform(post("/api/lab-tests").contentType(MediaType.APPLICATION_JSON).content("""
+		mvc.perform(post("/api/lab-tests").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("""
 				{"name": "Potassium", "referenceRangeLow": 6, "referenceRangeHigh": 3, "unit": "mmol/L"}
 				"""))
 			.andExpect(status().isBadRequest())
@@ -180,7 +181,7 @@ class KnowledgeBaseControllerTests {
 
 	@Test
 	void labTestWithMissingFieldsReturns400() throws Exception {
-		mvc.perform(post("/api/lab-tests").contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"Potassium\"}"))
+		mvc.perform(post("/api/lab-tests").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"name\": \"Potassium\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.errors.referenceRangeLow").exists())
 			.andExpect(jsonPath("$.errors.referenceRangeHigh").exists())
@@ -195,12 +196,12 @@ class KnowledgeBaseControllerTests {
 		given(labTestService.findById(9L)).willThrow(new ResourceNotFoundException("Lab test", 9L));
 
 		mvc.perform(get("/api/lab-tests")).andExpect(status().isOk()).andExpect(jsonPath("$[0].name").value("HbA1c"));
-		mvc.perform(put("/api/lab-tests/1").contentType(MediaType.APPLICATION_JSON).content("""
+		mvc.perform(put("/api/lab-tests/1").with(csrf()).contentType(MediaType.APPLICATION_JSON).content("""
 				{"name": "HbA1c", "referenceRangeLow": 4.0, "referenceRangeHigh": 5.6, "unit": "%"}
 				"""))
 			.andExpect(status().isOk());
 		mvc.perform(get("/api/lab-tests/9")).andExpect(status().isNotFound());
-		mvc.perform(delete("/api/lab-tests/1")).andExpect(status().isNoContent());
+		mvc.perform(delete("/api/lab-tests/1").with(csrf())).andExpect(status().isNoContent());
 	}
 
 }

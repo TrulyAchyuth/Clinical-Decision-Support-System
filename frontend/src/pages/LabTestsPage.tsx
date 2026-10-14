@@ -3,12 +3,14 @@ import { ApiError } from '../api/client'
 import { labTestsApi } from '../api/knowledgeBase'
 import type { LabTest } from '../api/types'
 import { Alert, Button, Card, EmptyState, ErrorAlert, Field, inputClass, Loading, PageHeader, Table, td, th } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
 import { useAsync } from '../hooks/useAsync'
 import { optionalText } from '../utils/format'
 
 const empty = { name: '', referenceRangeLow: '', referenceRangeHigh: '', unit: '', notes: '' }
 
 export function LabTestsPage() {
+  const { isAdmin } = useAuth()
   const labTests = useAsync(() => labTestsApi.list(), [])
   const [editing, setEditing] = useState<LabTest | 'new' | null>(null)
   const [form, setForm] = useState(empty)
@@ -65,8 +67,9 @@ export function LabTestsPage() {
   return (
     <>
       <PageHeader title="Lab tests"
-        description="Knowledge base. Reference ranges are educational examples — verify against your local laboratory."
-        actions={<Button onClick={() => open('new')}>Add lab test</Button>} />
+        description="Laboratory tests and reference ranges used to flag results. Verify ranges against your local laboratory."
+        actions={isAdmin && <Button onClick={() => open('new')}>Add lab test</Button>} />
+      {!isAdmin && <Alert kind="info">Read-only: only administrators can change the knowledge base.</Alert>}
       {message && <Alert kind="success" onDismiss={() => setMessage(undefined)}>{message}</Alert>}
       {error !== undefined && !editing && <ErrorAlert error={error} onDismiss={() => setError(undefined)} />}
 
@@ -114,8 +117,10 @@ export function LabTestsPage() {
                     <td className={td}>{test.referenceRangeLow}–{test.referenceRangeHigh} {test.unit}</td>
                     <td className={`${td} text-slate-500`}>{test.notes ?? ''}</td>
                     <td className={`${td} whitespace-nowrap text-right`}>
-                      <Button variant="ghost" onClick={() => open(test)}>Edit</Button>
-                      <Button variant="danger" className="ml-1" onClick={() => remove(test)}>Delete</Button>
+                      {isAdmin && <>
+                        <Button variant="ghost" onClick={() => open(test)}>Edit</Button>
+                        <Button variant="danger" className="ml-1" onClick={() => remove(test)}>Delete</Button>
+                      </>}
                     </td>
                   </tr>
                 ))}

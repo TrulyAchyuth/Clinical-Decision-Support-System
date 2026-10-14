@@ -25,6 +25,11 @@ export function nowForDateTimeInput(now = new Date()): string {
   return local.toISOString().slice(0, 16)
 }
 
+/** Value for <input type="date"> showing today's local date (YYYY-MM-DD). */
+export function todayForDateInput(now = new Date()): string {
+  return nowForDateTimeInput(now).slice(0, 10)
+}
+
 /** <input type="datetime-local"> value (local time) -> ISO instant for the backend; null if blank or invalid. */
 export function dateTimeInputToIso(value: string): string | null {
   const date = new Date(value)

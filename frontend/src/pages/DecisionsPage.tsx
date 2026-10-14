@@ -13,7 +13,7 @@ export function DecisionsPage() {
   return (
     <>
       <PageHeader title="Clinical decisions"
-        description="Educational rule-based decision support: recorded observations are checked against the stored clinical rules." />
+        description="Check a patient's recorded observations against the active clinical rules." />
       <Card className="mb-6">
         {patients.loading ? <Loading label="Loading patients…" />
           : patients.error ? <ErrorAlert error={patients.error} onRetry={patients.reload} />

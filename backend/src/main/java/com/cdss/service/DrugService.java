@@ -9,8 +9,11 @@ import com.cdss.dto.DrugRequest;
 import com.cdss.dto.DrugResponse;
 import com.cdss.entity.Drug;
 import com.cdss.exception.DuplicateResourceException;
+import com.cdss.exception.ResourceInUseException;
 import com.cdss.exception.ResourceNotFoundException;
 import com.cdss.repository.DrugRepository;
+import com.cdss.repository.PatientAllergyRepository;
+import com.cdss.repository.PatientMedicationRepository;
 
 @Service
 @Transactional
@@ -18,8 +21,15 @@ public class DrugService {
 
 	private final DrugRepository drugRepository;
 
-	public DrugService(DrugRepository drugRepository) {
+	private final PatientMedicationRepository medicationRepository;
+
+	private final PatientAllergyRepository allergyRepository;
+
+	public DrugService(DrugRepository drugRepository, PatientMedicationRepository medicationRepository,
+			PatientAllergyRepository allergyRepository) {
 		this.drugRepository = drugRepository;
+		this.medicationRepository = medicationRepository;
+		this.allergyRepository = allergyRepository;
 	}
 
 	@Transactional(readOnly = true)
@@ -54,8 +64,14 @@ public class DrugService {
 		return DrugResponse.from(drugRepository.saveAndFlush(drug));
 	}
 
+	/** A drug used by a patient medication or drug allergy cannot be deleted (409). */
 	public void delete(Long id) {
-		drugRepository.delete(getDrug(id));
+		Drug drug = getDrug(id);
+		if (medicationRepository.existsByDrugId(id) || allergyRepository.existsByDrugId(id)) {
+			throw new ResourceInUseException("Drug '" + drug.getName() + " " + drug.getDosage()
+					+ "' is used in patient medication or allergy records and cannot be deleted");
+		}
+		drugRepository.delete(drug);
 	}
 
 	private Drug getDrug(Long id) {

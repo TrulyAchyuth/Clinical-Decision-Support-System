@@ -32,21 +32,21 @@ class PatientServiceTests {
 	void createTrimsTextAndStoresBlankContactFieldsAsNull() {
 		given(repository.save(any(Patient.class))).willAnswer((invocation) -> withId(invocation.getArgument(0), 5L));
 
-		PatientResponse created = service.create(new PatientRequest("  Alex Example ", LocalDate.of(1958, 4, 12),
-				Gender.MALE, " ", "alex@example.com", ""));
+		PatientResponse created = service.create(new PatientRequest("  Daniel Okafor ", LocalDate.of(1958, 4, 12),
+				Gender.MALE, " ", "daniel@example.com", ""));
 
 		assertThat(created.id()).isEqualTo(5L);
-		assertThat(created.fullName()).isEqualTo("Alex Example");
+		assertThat(created.fullName()).isEqualTo("Daniel Okafor");
 		assertThat(created.phone()).isNull();
-		assertThat(created.email()).isEqualTo("alex@example.com");
+		assertThat(created.email()).isEqualTo("daniel@example.com");
 		assertThat(created.address()).isNull();
 	}
 
 	@Test
 	void findByIdReturnsPatient() {
-		given(repository.findById(1L)).willReturn(Optional.of(patient(1L, "Jordan Sample")));
+		given(repository.findById(1L)).willReturn(Optional.of(patient(1L, "Priya Raman")));
 
-		assertThat(service.findById(1L).fullName()).isEqualTo("Jordan Sample");
+		assertThat(service.findById(1L).fullName()).isEqualTo("Priya Raman");
 	}
 
 	@Test
@@ -60,12 +60,12 @@ class PatientServiceTests {
 	@Test
 	void findAllUsesSearchOnlyWhenGiven() {
 		given(repository.findAllByOrderByFullNameAsc()).willReturn(List.of(patient(1L, "A"), patient(2L, "B")));
-		given(repository.findByFullNameContainingIgnoreCaseOrderByFullNameAsc("ale"))
-			.willReturn(List.of(patient(1L, "Alex Example")));
+		given(repository.findByFullNameContainingIgnoreCaseOrderByFullNameAsc("dan"))
+			.willReturn(List.of(patient(1L, "Daniel Okafor")));
 
 		assertThat(service.findAll(null)).hasSize(2);
 		assertThat(service.findAll("  ")).hasSize(2);
-		assertThat(service.findAll(" ale ")).extracting(PatientResponse::fullName).containsExactly("Alex Example");
+		assertThat(service.findAll(" dan ")).extracting(PatientResponse::fullName).containsExactly("Daniel Okafor");
 	}
 
 	@Test
@@ -75,11 +75,11 @@ class PatientServiceTests {
 		given(repository.saveAndFlush(existing)).willReturn(existing);
 
 		PatientResponse updated = service.update(1L, new PatientRequest("New Name", LocalDate.of(1990, 1, 5),
-				Gender.FEMALE, "+1 555 0199", null, "2 Demo Road"));
+				Gender.FEMALE, "+1 555 0199", null, "27 Elm Court"));
 
 		assertThat(updated.fullName()).isEqualTo("New Name");
 		assertThat(updated.gender()).isEqualTo(Gender.FEMALE);
-		assertThat(existing.getAddress()).isEqualTo("2 Demo Road");
+		assertThat(existing.getAddress()).isEqualTo("27 Elm Court");
 	}
 
 	@Test
@@ -94,7 +94,7 @@ class PatientServiceTests {
 
 	@Test
 	void deleteRemovesExistingPatient() {
-		Patient existing = patient(1L, "Alex Example");
+		Patient existing = patient(1L, "Daniel Okafor");
 		given(repository.findById(1L)).willReturn(Optional.of(existing));
 
 		service.delete(1L);

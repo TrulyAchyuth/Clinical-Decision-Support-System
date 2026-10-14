@@ -30,8 +30,11 @@ this file wins; fix the other doc in the same change.
   diagnosis, and never present "no rules matched" as "patient is well".
 - Missing, stale or implausible data must never be treated as normal
   (see the three-valued logic in `docs/ARCHITECTURE.md` §5.4).
-- The UI shows a visible disclaimer: *"Educational prototype — synthetic data
-  only — not for clinical use."*
+- The login page shows the disclaimer *"Educational prototype — synthetic
+  data only — not for clinical use."*; every clinical decision result shows
+  the backend's disclaimer, and illustrative drug-interaction results are
+  labelled at the point of use. The normal application chrome carries no
+  repeated prototype banner (owner decision, 2026-10-14).
 
 ### Keep it simple — do NOT add
 
@@ -45,7 +48,7 @@ seems to need one of these, ask the repository owner first.
 
 ## 2. Current status
 
-Implementation follows steps **A–F** in `docs/PROJECT_PLAN.md`.
+Implementation follows steps **A–H** in `docs/PROJECT_PLAN.md`.
 
 | Step | Name | Status |
 |------|------|--------|
@@ -54,16 +57,24 @@ Implementation follows steps **A–F** in `docs/PROJECT_PLAN.md`.
 | C | Patient CRUD + knowledge-base APIs (drugs, diseases, lab tests) | **Done** — 59 tests pass; endpoints checked against local MySQL |
 | D | Patient clinical records, clinical rules, JSON rule engine + decision APIs | **Done** — 145 unit/web tests pass (+7 MySQL integration tests, opt-in, pass) |
 | E | React frontend connected to the backend | **Done** — no existing frontend was supplied, so one was built in `frontend/`; 23 frontend tests pass |
-| F | Authentication, tests, final demo | **Next** |
+| F | Authentication, tests, final demo | **Implemented** — login, roles, CSRF, dev binding to 127.0.0.1; main workflows confirmed in the browser by the owner (2026-10-14); full `docs/DEMO.md` checklist not formally ticked |
+| G | Medications, allergies, medication safety check, rule management, follow-ups | **Implemented** — V8–V10 applied to the local database (2026-10-14) |
+| H | Separate clinician/admin workspaces, user management, profile menu, UI clean-up, detailed medication safety feedback | **Implemented** — V11–V12 applied; 499 backend tests pass (+9 MySQL integration tests, opt-in, **not run**); 75 frontend tests pass; build succeeds |
 
 **Implemented so far:** Spring Boot backend on local MySQL, Flyway
-migrations V1–V6, `GET /api/health`, patient CRUD, knowledge-base CRUD
+migrations V1–V12, `GET /api/health`, patient CRUD, knowledge-base CRUD
 (drugs, diseases, lab tests), patient clinical records (vital signs, lab
 results, conditions), JSON clinical rules + plain-Java rule engine, decision
-API with stored history. `/api/**` is open without login in the `dev`
-profile only (`cdss.security.open-api`) until step F.
-React frontend (`frontend/`) for every backend feature.
-**No login exists yet.**
+API with stored history. React frontend (`frontend/`) for every backend
+feature. Session login (`/api/auth/*`), BCrypt, roles `ADMIN`/`CLINICIAN`
+enforced in `SecurityConfig`, CSRF tokens; demo users from `.env`
+(`docs/DEMO.md`). Patient medications and allergies, a medication safety
+check (allergies, duplicates, **illustrative sample** interactions; warnings
+must be acknowledged), rule activation/dry run/builder, and follow-ups
+(step G); V1–V12 are applied locally. Separate clinician and administrator
+workspaces, admin-only rule JSON and user management, sessions ended on
+deactivation or role change, profile menu, detailed safety feedback with
+source labels and change-aware acknowledgements (step H).
 Keep documentation honest: anything not built and tested is labelled
 *Planned*. Update this table and the README status at the end of every step.
 
@@ -100,7 +111,8 @@ Python, JSON-server mocks that duplicate business logic, etc.).
 ├── .env.example            # Placeholder settings; copy to .env (git-ignored)
 ├── docs/
 │   ├── PROJECT_PLAN.md     # Steps A–F, deliverables, done criteria
-│   └── ARCHITECTURE.md     # Architecture, data model, API, rule engine, decisions
+│   ├── ARCHITECTURE.md     # Architecture, data model, API, rule engine, decisions
+│   └── DEMO.md             # Demo accounts, demo script, manual test checklist
 ├── backend/                # Spring Boot app (see backend/README.md)
 ├── frontend/               # React app (see frontend/README.md)
 └── tests/                  # README only — tests live inside backend/ and frontend/
@@ -157,7 +169,8 @@ them; document any deviation in the decision log in `docs/ARCHITECTURE.md`.
 - All HTTP calls go through `src/api/client.ts`; `src/api/types.ts` mirrors the
   backend DTOs. Never invent endpoints or show mock data as if it were real.
 - One base URL: `VITE_API_BASE_URL` (default `/api`, proxied by Vite to
-  `localhost:8080`). Never put secrets in `VITE_*` variables.
+  `127.0.0.1:8080`, where the `dev` profile binds the backend). Never put
+  secrets in `VITE_*` variables.
 - Show loading, empty, success and error states; display backend validation
   errors under the fields.
 - Show the backend's disclaimer with every decision, and never word "no rule
@@ -187,15 +200,19 @@ them; document any deviation in the decision log in `docs/ARCHITECTURE.md`.
 3. **Passwords** stored as BCrypt hashes.
 4. **Authentication:** session-based login (`POST /api/auth/login`), logout,
    and `GET /api/auth/me`. No JWT or other token schemes.
-5. **Authorization:** every endpoint except `/api/health` and
-   `/api/auth/login` requires login once step F is complete. `ADMIN` manages
+5. **Authorization:** every endpoint except `/api/health`,
+   `/api/auth/csrf` and `/api/auth/login` requires login. `ADMIN` manages
    the knowledge base (drugs, diseases, lab tests) and clinical rules, and can
-   delete patients; `CLINICIAN` manages patient data and runs decisions. Enforce in `SecurityConfig` (URL rules) and/or
-   `@PreAuthorize`.
-6. **Session cookie:** HttpOnly and `SameSite=Strict`. CSRF tokens are
-   disabled for the JSON API because `SameSite=Strict` stops browsers sending
-   the cookie on cross-site requests (documented deviation; see
-   `docs/ARCHITECTURE.md`).
+   delete patients; `CLINICIAN` manages patient data and runs decisions.
+   Enforce in `SecurityConfig` (URL rules) and/or `@PreAuthorize`. Every new
+   endpoint must get a rule in `SecurityConfig` and a case in
+   `SecurityConfigTests`.
+6. **Session cookie:** HttpOnly and `SameSite=Strict`. **CSRF protection is
+   on** for every POST, PUT and DELETE (login and logout included): the token
+   is stored in the session, fetched from `GET /api/auth/csrf`, and sent in
+   the `X-CSRF-TOKEN` header. Never disable CSRF to make a request work.
+   (Changed in step F from the earlier "SameSite only" plan; see the decision
+   log in `docs/ARCHITECTURE.md`.)
 7. **Input validation** on all request DTOs; rule JSON validated by the rule
    validator before it is saved or evaluated.
 8. **Rule engine safety:** rules are data only. No `eval`, scripting, SpEL, or
@@ -222,7 +239,10 @@ them; document any deviation in the decision log in `docs/ARCHITECTURE.md`.
   reported as skipped. When reporting results, state skipped tests and
   whether the MySQL tests were run.
 - The whole system is also checked by running the app and following the demo
-  checklist (`docs/DEMO.md`, created in step F).
+  checklist (`docs/DEMO.md`).
+- `MySqlIntegrationTests` use the **development** database (there is no
+  separate test database) and Flyway applies pending migrations to it, so
+  run them only with the repository owner's approval.
 - **Frontend:** Vitest + React Testing Library (`cd frontend && npm test`),
   with `fetch` replaced by `src/test/fetchMock.ts`, so no backend is needed.
   Run `npm run build` (type check + production build) as well.

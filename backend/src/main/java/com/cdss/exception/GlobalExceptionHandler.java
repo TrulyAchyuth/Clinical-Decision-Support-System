@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -26,7 +27,10 @@ import com.cdss.ruleengine.RuleValidationException;
  * Turns exceptions into JSON error responses (RFC 9457 Problem Details).
  * Spring's base class already handles malformed JSON, wrong parameter types
  * and unknown URLs; this class adds validation details, invalid rules,
- * 404, 409 and a generic 500 that never exposes internal details.
+ * failed logins (401), 404, 409 (including status changes that are not
+ * allowed and unacknowledged medication safety warnings) and a generic 500 that never exposes
+ * internal details. 401/403 from the security filters are written by
+ * {@code com.cdss.config.SecurityErrorResponses}.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -48,9 +52,30 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		return problem(HttpStatus.CONFLICT, ex.getMessage());
 	}
 
+	@ExceptionHandler(StatusChangeNotAllowedException.class)
+	ProblemDetail handleStatusChange(StatusChangeNotAllowedException ex) {
+		return problem(HttpStatus.CONFLICT, ex.getMessage());
+	}
+
+	/** Lists the safety-check warnings that must be acknowledged before the medication can be saved. */
+	@ExceptionHandler(SafetyAcknowledgementRequiredException.class)
+	ProblemDetail handleSafetyAcknowledgement(SafetyAcknowledgementRequiredException ex) {
+		ProblemDetail body = problem(HttpStatus.CONFLICT, ex.getMessage());
+		body.setProperty("code", "SAFETY_ACKNOWLEDGEMENT_REQUIRED");
+		body.setProperty("unacknowledgedWarnings", ex.getUnacknowledgedWarnings());
+		body.setProperty("safetyCheck", ex.getSafetyCheck());
+		return body;
+	}
+
 	@ExceptionHandler(InvalidRequestException.class)
 	ProblemDetail handleInvalidRequest(InvalidRequestException ex) {
 		return problem(HttpStatus.BAD_REQUEST, ex.getMessage());
+	}
+
+	/** Failed login. The same message for an unknown user, a wrong password or a disabled account. */
+	@ExceptionHandler(AuthenticationException.class)
+	ProblemDetail handleFailedLogin(AuthenticationException ex) {
+		return problem(HttpStatus.UNAUTHORIZED, "Invalid username or password");
 	}
 
 	/** Invalid rule JSON: lists each problem by its location in the rule. */

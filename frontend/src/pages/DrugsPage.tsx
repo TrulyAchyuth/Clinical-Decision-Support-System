@@ -3,12 +3,14 @@ import { ApiError } from '../api/client'
 import { drugsApi } from '../api/knowledgeBase'
 import type { Drug } from '../api/types'
 import { Alert, Button, Card, EmptyState, ErrorAlert, Field, inputClass, Loading, PageHeader, Table, td, th } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
 import { useAsync } from '../hooks/useAsync'
 import { optionalText } from '../utils/format'
 
 const empty = { name: '', dosage: '', category: '', notes: '' }
 
 export function DrugsPage() {
+  const { isAdmin } = useAuth()
   const drugs = useAsync(() => drugsApi.list(), [])
   const [editing, setEditing] = useState<Drug | 'new' | null>(null)
   const [form, setForm] = useState(empty)
@@ -55,8 +57,9 @@ export function DrugsPage() {
 
   return (
     <>
-      <PageHeader title="Drugs" description="Knowledge base. Dosages are educational examples, not prescribing guidance."
-        actions={<Button onClick={() => open('new')}>Add drug</Button>} />
+      <PageHeader title="Drugs" description="Drugs used for patient medications and allergies. Listed strengths are catalogue entries, not prescribing guidance."
+        actions={isAdmin && <Button onClick={() => open('new')}>Add drug</Button>} />
+      {!isAdmin && <Alert kind="info">Read-only: only administrators can change the knowledge base.</Alert>}
       {message && <Alert kind="success" onDismiss={() => setMessage(undefined)}>{message}</Alert>}
       {error !== undefined && !editing && <ErrorAlert error={error} onDismiss={() => setError(undefined)} />}
 
@@ -99,8 +102,10 @@ export function DrugsPage() {
                     <td className={td}>{drug.category}</td>
                     <td className={`${td} text-slate-500`}>{drug.notes ?? ''}</td>
                     <td className={`${td} whitespace-nowrap text-right`}>
-                      <Button variant="ghost" onClick={() => open(drug)}>Edit</Button>
-                      <Button variant="danger" className="ml-1" onClick={() => remove(drug)}>Delete</Button>
+                      {isAdmin && <>
+                        <Button variant="ghost" onClick={() => open(drug)}>Edit</Button>
+                        <Button variant="danger" className="ml-1" onClick={() => remove(drug)}>Delete</Button>
+                      </>}
                     </td>
                   </tr>
                 ))}

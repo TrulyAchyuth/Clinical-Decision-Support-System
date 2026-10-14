@@ -12,8 +12,8 @@ import org.springframework.core.io.ClassPathResource;
 
 /**
  * Guards configuration decisions recorded in CLAUDE.md: Flyway owns the
- * schema, Hibernate only validates it, and credentials come from the
- * environment.
+ * schema, Hibernate only validates it, credentials come from the
+ * environment, and the session cookie is HttpOnly and SameSite=Strict.
  */
 class ApplicationConfigurationTests {
 
@@ -50,9 +50,40 @@ class ApplicationConfigurationTests {
 	}
 
 	@Test
-	void unauthenticatedApiAccessIsOnlyEnabledInDevProfile() {
+	void followUpsAreUpcomingWithinAConfiguredWindow() {
+		assertThat(config.getProperty("cdss.follow-ups.upcoming-window")).hasToString("7d");
+	}
+
+	@Test
+	void noProfileOpensTheApiWithoutLogin() {
 		assertThat(config.getProperty("cdss.security.open-api")).isNull();
-		assertThat(load("application-dev.yml").getProperty("cdss.security.open-api")).isEqualTo(true);
+		assertThat(load("application-dev.yml").getProperty("cdss.security.open-api")).isNull();
+	}
+
+	@Test
+	void onlyTheDevProfileBindsToLoopback() {
+		assertThat(load("application-dev.yml").getProperty("server.address")).hasToString("127.0.0.1");
+		assertThat(config.getProperty("server.address")).isNull();
+	}
+
+	@Test
+	void sessionCookieIsNotMarkedSecureByDefaultSoLocalHttpWorks() {
+		assertThat(config.getProperty("server.servlet.session.cookie.secure")).isNull();
+		assertThat(load("application-dev.yml").getProperty("server.servlet.session.cookie.secure")).isNull();
+	}
+
+	@Test
+	void sessionCookieIsHttpOnlyAndSameSiteStrict() {
+		assertThat(config.getProperty("server.servlet.session.cookie.http-only")).isEqualTo(true);
+		assertThat(config.getProperty("server.servlet.session.cookie.same-site")).hasToString("strict");
+	}
+
+	@Test
+	void demoUserPasswordsComeOnlyFromEnvironmentInDevProfile() {
+		PropertySource<?> dev = load("application-dev.yml");
+		assertThat(dev.getProperty("cdss.demo-users.admin-password")).hasToString("${CDSS_DEMO_ADMIN_PASSWORD:}");
+		assertThat(dev.getProperty("cdss.demo-users.clinician-password")).hasToString("${CDSS_DEMO_CLINICIAN_PASSWORD:}");
+		assertThat(config.getProperty("cdss.demo-users.admin-password")).isNull();
 	}
 
 	private static PropertySource<?> load(String name) {

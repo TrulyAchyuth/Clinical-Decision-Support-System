@@ -54,6 +54,13 @@ public class Patient {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/** When "no known allergies" was confirmed; null when it was not (see AllergyService). */
+	@Column(name = "no_known_allergies_at")
+	private Instant noKnownAllergiesAt;
+
+	@Column(name = "no_known_allergies_by", length = 50)
+	private String noKnownAllergiesBy;
+
 	public Long getId() {
 		return id;
 	}
@@ -112,6 +119,20 @@ public class Patient {
 
 	public Instant getUpdatedAt() {
 		return updatedAt;
+	}
+
+	public Instant getNoKnownAllergiesAt() {
+		return noKnownAllergiesAt;
+	}
+
+	public String getNoKnownAllergiesBy() {
+		return noKnownAllergiesBy;
+	}
+
+	/** Records (or clears, with nulls) the confirmation that the patient has no known allergies. */
+	public void setNoKnownAllergies(Instant confirmedAt, String confirmedBy) {
+		this.noKnownAllergiesAt = confirmedAt;
+		this.noKnownAllergiesBy = confirmedBy;
 	}
 
 }

@@ -1,15 +1,20 @@
 import { useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { patientsApi } from '../api/patients'
-import { ClinicalPanel } from '../components/ClinicalPanel'
+import { AllergyBanner } from '../components/AllergiesTab'
+import { ClinicalPanel, clinicalTabs, type ClinicalTab } from '../components/ClinicalPanel'
 import { Alert, Button, Card, ErrorAlert, Loading, PageHeader } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
 import { useAsync } from '../hooks/useAsync'
 import { ageInYears, formatDate, formatDateTime, titleCase } from '../utils/format'
 
 export function PatientDetailPage() {
+  const { isAdmin } = useAuth()
   const patientId = Number(useParams().id)
   const navigate = useNavigate()
   const location = useLocation()
+  const requestedTab = useSearchParams()[0].get('tab')
+  const initialTab = clinicalTabs.includes(requestedTab as ClinicalTab) ? requestedTab as ClinicalTab : undefined
   const patient = useAsync(() => patientsApi.get(patientId), [patientId])
   const [message, setMessage] = useState<string | undefined>((location.state as { message?: string } | null)?.message)
   const [error, setError] = useState<unknown>()
@@ -33,7 +38,7 @@ export function PatientDetailPage() {
       <PageHeader title={p.fullName} description={`Patient #${p.id}`}
         actions={<>
           <Button variant="secondary" onClick={() => navigate(`/patients/${p.id}/edit`)}>Edit</Button>
-          <Button variant="danger" onClick={remove}>Delete</Button>
+          {isAdmin && <Button variant="danger" onClick={remove}>Delete</Button>}
         </>} />
       {message && <Alert kind="success" onDismiss={() => setMessage(undefined)}>{message}</Alert>}
       {error !== undefined && <ErrorAlert error={error} onDismiss={() => setError(undefined)} />}
@@ -47,7 +52,8 @@ export function PatientDetailPage() {
           <Item label="Last updated" value={formatDateTime(p.updatedAt)} />
         </dl>
       </Card>
-      <ClinicalPanel patientId={p.id} />
+      <AllergyBanner patientId={p.id} />
+      <ClinicalPanel patientId={p.id} initialTab={initialTab} />
     </>
   )
 }

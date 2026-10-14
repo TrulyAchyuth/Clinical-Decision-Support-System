@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -31,7 +32,7 @@ import com.cdss.service.DecisionService;
 
 @WebMvcTest(DecisionController.class)
 @Import(SecurityConfig.class)
-@WithMockUser
+@WithMockUser(roles = "CLINICIAN")
 class DecisionControllerTests {
 
 	private static final Instant TIME = Instant.parse("2026-10-13T12:00:00Z");
@@ -46,7 +47,7 @@ class DecisionControllerTests {
 	void requestingADecisionReturns201WithMatchesReasonsAndActions() throws Exception {
 		given(decisionService.requestDecision(1L)).willReturn(matchedDecision());
 
-		mvc.perform(post("/api/patients/1/decisions"))
+		mvc.perform(post("/api/patients/1/decisions").with(csrf()))
 			.andExpect(status().isCreated())
 			.andExpect(header().string("Location", "http://localhost/api/patients/1/decisions/12"))
 			.andExpect(jsonPath("$.outcome").value("RULES_MATCHED"))
@@ -65,7 +66,7 @@ class DecisionControllerTests {
 				"No active rule matched the recorded data. This does not rule out any condition.", 5, 5, List.of(),
 				List.of(), List.of(), DecisionResponse.DISCLAIMER));
 
-		mvc.perform(post("/api/patients/1/decisions"))
+		mvc.perform(post("/api/patients/1/decisions").with(csrf()))
 			.andExpect(status().isCreated())
 			.andExpect(jsonPath("$.outcome").value("NO_RULES_MATCHED"))
 			.andExpect(jsonPath("$.matchedRules").isEmpty())
@@ -77,10 +78,10 @@ class DecisionControllerTests {
 	void unknownPatientReturns404AndBadIdReturns400() throws Exception {
 		given(decisionService.requestDecision(99L)).willThrow(new ResourceNotFoundException("Patient", 99L));
 
-		mvc.perform(post("/api/patients/99/decisions"))
+		mvc.perform(post("/api/patients/99/decisions").with(csrf()))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.detail").value("Patient with id 99 was not found"));
-		mvc.perform(post("/api/patients/abc/decisions")).andExpect(status().isBadRequest());
+		mvc.perform(post("/api/patients/abc/decisions").with(csrf())).andExpect(status().isBadRequest());
 	}
 
 	@Test

@@ -27,7 +27,9 @@ import com.cdss.repository.DiseaseRepository;
 import com.cdss.repository.DrugRepository;
 import com.cdss.repository.LabResultRepository;
 import com.cdss.repository.LabTestRepository;
+import com.cdss.repository.PatientAllergyRepository;
 import com.cdss.repository.PatientConditionRepository;
+import com.cdss.repository.PatientMedicationRepository;
 
 class KnowledgeBaseServiceTests {
 
@@ -41,7 +43,11 @@ class KnowledgeBaseServiceTests {
 
 	private final PatientConditionRepository conditionRepository = mock(PatientConditionRepository.class);
 
-	private final DrugService drugService = new DrugService(drugRepository);
+	private final PatientMedicationRepository medicationRepository = mock(PatientMedicationRepository.class);
+
+	private final PatientAllergyRepository allergyRepository = mock(PatientAllergyRepository.class);
+
+	private final DrugService drugService = new DrugService(drugRepository, medicationRepository, allergyRepository);
 
 	private final DiseaseService diseaseService = new DiseaseService(diseaseRepository, conditionRepository);
 
@@ -85,6 +91,23 @@ class KnowledgeBaseServiceTests {
 		given(drugRepository.findById(9L)).willReturn(Optional.empty());
 
 		assertThatThrownBy(() -> drugService.delete(9L)).isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void drugUsedByAPatientMedicationOrAllergyCannotBeDeleted() {
+		Drug warfarin = new Drug();
+		warfarin.setName("Warfarin");
+		warfarin.setDosage("5 mg");
+		given(drugRepository.findById(4L)).willReturn(Optional.of(warfarin));
+		given(medicationRepository.existsByDrugId(4L)).willReturn(true);
+
+		assertThatThrownBy(() -> drugService.delete(4L)).isInstanceOf(ResourceInUseException.class)
+			.hasMessageContaining("Warfarin 5 mg");
+
+		given(medicationRepository.existsByDrugId(4L)).willReturn(false);
+		given(allergyRepository.existsByDrugId(4L)).willReturn(true);
+		assertThatThrownBy(() -> drugService.delete(4L)).isInstanceOf(ResourceInUseException.class);
+		verify(drugRepository, never()).delete(any(Drug.class));
 	}
 
 	// ---- diseases ----

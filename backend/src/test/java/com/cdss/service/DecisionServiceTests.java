@@ -23,6 +23,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.cdss.dto.DecisionResponse;
+import com.cdss.dto.RuleDryRunRequest;
+import com.cdss.dto.RuleDryRunResponse;
 import com.cdss.entity.ClinicalDecision;
 import com.cdss.entity.ClinicalRule;
 import com.cdss.entity.DecisionOutcome;
@@ -36,6 +38,7 @@ import com.cdss.repository.PatientRepository;
 import com.cdss.ruleengine.FactCatalog;
 import com.cdss.ruleengine.FactDefinition;
 import com.cdss.ruleengine.PatientFacts;
+import com.cdss.ruleengine.RuleError;
 
 class DecisionServiceTests {
 
@@ -180,6 +183,46 @@ class DecisionServiceTests {
 		assertThat(service.findDecision(1L, 5L).outcome()).isEqualTo(DecisionOutcome.NO_RULES_MATCHED);
 		assertThatThrownBy(() -> service.findDecision(1L, 6L)).isInstanceOf(ResourceNotFoundException.class)
 			.hasMessage("Decision with id 6 was not found");
+	}
+
+	@Test
+	void dryRunEvaluatesAnUnsavedConditionAndStoresNothing() {
+		facts(new PatientFacts().withNumber(FactCatalog.HEART_RATE, new BigDecimal("118"), NOW.minusSeconds(600)));
+
+		RuleDryRunResponse matched = service.dryRun(new RuleDryRunRequest(
+				Map.of("fact", "vitals.heartRate", "operator", "gt", "value", 100), 1L));
+		assertThat(matched.valid()).isTrue();
+		assertThat(matched.result()).isEqualTo("MATCHED");
+		assertThat(matched.reasons()).anyMatch((reason) -> reason.startsWith("Heart rate is 118"));
+
+		RuleDryRunResponse notMatched = service.dryRun(new RuleDryRunRequest(
+				Map.of("fact", "vitals.heartRate", "operator", "gt", "value", 130), 1L));
+		assertThat(notMatched.result()).isEqualTo("NOT_MATCHED");
+
+		RuleDryRunResponse missing = service.dryRun(new RuleDryRunRequest(
+				Map.of("fact", "vitals.temperature", "operator", "gt", "value", 38), 1L));
+		assertThat(missing.result()).isEqualTo("INSUFFICIENT_DATA");
+		assertThat(missing.reasons()).isNotEmpty();
+		verify(decisionRepository, never()).save(any());
+	}
+
+	@Test
+	void dryRunReportsAnInvalidConditionWithoutEvaluatingIt() {
+		RuleDryRunResponse invalid = service.dryRun(new RuleDryRunRequest(
+				Map.of("fact", "vitals.pulse", "operator", "gt", "value", 100), 1L));
+
+		assertThat(invalid.valid()).isFalse();
+		assertThat(invalid.result()).isNull();
+		assertThat(invalid.errors()).extracting(RuleError::message).anyMatch((message) -> message.contains("vitals.pulse"));
+		verify(factsService, never()).collect(any(), any());
+	}
+
+	@Test
+	void dryRunForUnknownPatientGives404() {
+		given(patientRepository.findById(9L)).willReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service.dryRun(new RuleDryRunRequest(Map.of(), 9L)))
+			.isInstanceOf(ResourceNotFoundException.class);
 	}
 
 	private void rules(ClinicalRule... rules) {

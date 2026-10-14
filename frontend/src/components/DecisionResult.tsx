@@ -12,7 +12,7 @@ export function DecisionResult({ decision }: { decision: Decision }) {
   return (
     <div className="space-y-4">
       <div className="rounded-lg border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="note">
-        <p className="font-semibold">Educational rule-based decision support — not a diagnosis</p>
+        <p className="font-semibold">Rule-based decision support — not a diagnosis</p>
         <p className="mt-1">{decision.disclaimer}</p>
       </div>
 

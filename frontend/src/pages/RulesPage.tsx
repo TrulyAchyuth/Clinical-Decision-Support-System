@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { ApiError, errorMessage } from '../api/client'
-import { rulesApi, toRuleInput } from '../api/rules'
-import type { Rule, RuleInput, RuleValidation, Severity } from '../api/types'
+import { patientsApi } from '../api/patients'
+import { rulesApi } from '../api/rules'
+import type { Rule, RuleDryRun, RuleInput, RuleValidation, Severity } from '../api/types'
 import {
   Alert, Badge, Button, Card, EmptyState, ErrorAlert, Field, inputClass, Loading, PageHeader, SeverityBadge, Table, td, th,
 } from '../components/ui'
+import { useAuth } from '../components/AuthProvider'
+import { ConditionBuilder, describeCondition, RuleErrorList } from '../components/RuleConditionTools'
 import { useAsync } from '../hooks/useAsync'
 import { optionalText } from '../utils/format'
 
@@ -58,7 +61,22 @@ function toInput(form: RuleForm): RuleInput {
   }
 }
 
+function parseCondition(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+function visibleRules(rules: Rule[], search: string, status: 'all' | 'active' | 'inactive'): Rule[] {
+  const term = search.trim().toLowerCase()
+  return rules.filter((r) => (status === 'all' || (status === 'active') === r.enabled)
+    && (term === '' || [r.name, r.ruleId, r.description ?? ''].some((t) => t.toLowerCase().includes(term))))
+}
+
 export function RulesPage() {
+  const { isAdmin } = useAuth()
   const rules = useAsync(() => rulesApi.list(), [])
   const facts = useAsync(() => rulesApi.facts(), [])
   const [editing, setEditing] = useState<Rule | 'new' | null>(null)
@@ -67,16 +85,23 @@ export function RulesPage() {
   const [error, setError] = useState<unknown>()
   const [validation, setValidation] = useState<RuleValidation>()
   const [message, setMessage] = useState<string>()
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [viewing, setViewing] = useState<number>()
+  const [dryRunPatient, setDryRunPatient] = useState('')
+  const [dryRun, setDryRun] = useState<RuleDryRun>()
+  const patients = useAsync(() => (isAdmin ? patientsApi.list() : Promise.resolve([])), [isAdmin])
   const fieldErrors = error instanceof ApiError ? error.fieldErrors : {}
+  const parsedCondition = parseCondition(form.condition)
 
   function open(rule: Rule | 'new') {
-    setEditing(rule); setError(undefined); setValidation(undefined); setMessage(undefined)
+    setEditing(rule); setError(undefined); setValidation(undefined); setMessage(undefined); setDryRun(undefined)
     setForm(rule === 'new' ? emptyForm : toForm(rule))
   }
 
   function update<K extends keyof RuleForm>(key: K, value: RuleForm[K]) {
     setForm({ ...form, [key]: value })
-    setValidation(undefined)
+    setValidation(undefined); setDryRun(undefined)
   }
 
   async function check() {
@@ -106,14 +131,32 @@ export function RulesPage() {
     }
   }
 
+  /** Activation re-validates the stored rule on the server; deactivation always works. */
   async function toggle(rule: Rule) {
+    const question = rule.enabled
+      ? `Deactivate ${rule.ruleId}? It will no longer be evaluated in new decisions. Past decisions are unchanged.`
+      : `Activate ${rule.ruleId}? The backend validates it first; it will then be evaluated in every new decision.`
+    if (!window.confirm(question)) return
     setError(undefined); setMessage(undefined)
     try {
-      await rulesApi.update(rule.id, { ...toRuleInput(rule), enabled: !rule.enabled })
-      setMessage(`Rule ${rule.ruleId} ${rule.enabled ? 'disabled' : 'enabled'}.`)
+      if (rule.enabled) await rulesApi.deactivate(rule.id)
+      else await rulesApi.activate(rule.id)
+      setMessage(`Rule ${rule.ruleId} ${rule.enabled ? 'deactivated' : 'activated'}.`)
       rules.reload()
     } catch (err) {
       setError(err)
+    }
+  }
+
+  async function runDryRun() {
+    setBusy(true); setError(undefined); setDryRun(undefined)
+    try {
+      const input = toInput(form)
+      setDryRun(await rulesApi.dryRun(input.condition, Number(dryRunPatient)))
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -132,8 +175,9 @@ export function RulesPage() {
   return (
     <>
       <PageHeader title="Clinical rules"
-        description="Rules are stored as JSON in the database and checked by the backend before they are saved. All sample rules are illustrative and not clinically validated."
-        actions={<Button onClick={() => open('new')}>Add rule</Button>} />
+        description="Configure the rules evaluated in clinical decisions. Every rule is validated by the backend before it is saved or activated. Sample rules are illustrative and not clinically validated."
+        actions={isAdmin && <Button onClick={() => open('new')}>Add rule</Button>} />
+      {!isAdmin && <Alert kind="info">Read-only: only administrators can change clinical rules.</Alert>}
       {message && <Alert kind="success" onDismiss={() => setMessage(undefined)}>{message}</Alert>}
       {error !== undefined && !editing && <ErrorAlert error={error} onDismiss={() => setError(undefined)} />}
 
@@ -146,9 +190,7 @@ export function RulesPage() {
               : (
                 <Alert kind="error">
                   <p className="font-medium">The backend found problems in this rule:</p>
-                  <ul className="mt-1 list-disc pl-5">
-                    {validation.errors.map((e) => <li key={e.path + e.message}><span className="font-mono text-xs">{e.path}</span>: {e.message}</li>)}
-                  </ul>
+                  <RuleErrorList errors={validation.errors} />
                 </Alert>
               ))}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -167,12 +209,22 @@ export function RulesPage() {
                 <input id="r-priority" type="number" className={inputClass} value={form.priority} onChange={(e) => update('priority', e.target.value)} />
               </Field>
               <div className="md:col-span-2 lg:col-span-4">
-                <Field label="Description" htmlFor="r-desc" error={fieldErrors.description} hint="Say what the rule checks and that it is an educational example.">
+                <Field label="Description" htmlFor="r-desc" error={fieldErrors.description} hint="Describe what the rule checks; say so if it is illustrative.">
                   <textarea id="r-desc" rows={2} className={inputClass} value={form.description} onChange={(e) => update('description', e.target.value)} />
                 </Field>
               </div>
+              <div className="md:col-span-2 lg:col-span-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-700">Condition builder</p>
+                {parsedCondition === undefined
+                  ? <p className="text-sm text-slate-600">The JSON below is not valid yet, so the builder cannot show it.</p>
+                  : <ConditionBuilder condition={parsedCondition} facts={facts.data ?? []}
+                      onChange={(c) => update('condition', JSON.stringify(c, null, 2))} />}
+                <p className="mt-3 text-sm text-slate-700"><span className="font-medium">In plain English:</span>{' '}
+                  {parsedCondition === undefined ? '—' : describeCondition(parsedCondition, facts.data ?? [])}</p>
+              </div>
               <div className="md:col-span-2">
-                <Field label="Condition (JSON)" htmlFor="r-condition" required error={fieldErrors.condition}>
+                <Field label="Condition (JSON)" htmlFor="r-condition" required error={fieldErrors.condition}
+                  hint="Advanced: the builder above writes this for you.">
                   <textarea id="r-condition" rows={12} spellCheck={false} className={`${inputClass} font-mono text-xs`} value={form.condition} onChange={(e) => update('condition', e.target.value)} />
                 </Field>
               </div>
@@ -186,6 +238,27 @@ export function RulesPage() {
                 </label>
               </div>
             </div>
+            <div className="mt-4 rounded-lg border border-slate-200 p-3">
+              <p className="text-sm font-medium text-slate-700">Dry run: try the condition on a patient (nothing is saved)</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select aria-label="Patient for dry run" className={`${inputClass} w-auto`} value={dryRunPatient} onChange={(e) => setDryRunPatient(e.target.value)}>
+                  <option value="">Choose a patient</option>
+                  {patients.data?.map((p) => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+                </select>
+                <Button variant="secondary" onClick={runDryRun} disabled={busy || !dryRunPatient}>Test on patient</Button>
+              </div>
+              {dryRun && (dryRun.valid ? (
+                <Alert kind={dryRun.result === 'MATCHED' ? 'warning' : 'info'}>
+                  <p className="font-medium">{dryRun.result === 'MATCHED' ? 'The condition matches this patient now'
+                    : dryRun.result === 'NOT_MATCHED' ? 'The condition does not match this patient now'
+                      : 'Insufficient data: the condition cannot be evaluated for this patient'}</p>
+                  <ul className="mt-1 list-disc pl-5">{dryRun.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+                  <p className="mt-1 text-xs">{dryRun.note}</p>
+                </Alert>
+              ) : (
+                <Alert kind="error"><p className="font-medium">The condition is not valid:</p><RuleErrorList errors={dryRun.errors} /></Alert>
+              ))}
+            </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="secondary" onClick={check} disabled={busy}>Check rule</Button>
               <Button type="submit" disabled={busy}>{busy ? 'Working…' : 'Save rule'}</Button>
@@ -196,30 +269,54 @@ export function RulesPage() {
       )}
 
       <Card className="mb-6">
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <Field label="Search rules" htmlFor="r-search">
+            <input id="r-search" className={inputClass} placeholder="Name, rule ID or description" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </Field>
+          <Field label="Status" htmlFor="r-status">
+            <select id="r-status" className={inputClass} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
+              <option value="all">All rules</option><option value="active">Active only</option><option value="inactive">Inactive only</option>
+            </select>
+          </Field>
+        </div>
         {rules.loading ? <Loading /> : rules.error ? <ErrorAlert error={rules.error} onRetry={rules.reload} />
-          : !rules.data?.length ? <EmptyState>No rules yet.</EmptyState> : (
+          : !rules.data?.length ? <EmptyState>No rules yet.</EmptyState> : visibleRules(rules.data, search, statusFilter).length === 0
+            ? <EmptyState>No rules match the search.</EmptyState> : (
             <Table>
               <thead><tr><th className={th}>Priority</th><th className={th}>Rule</th><th className={th}>Severity</th><th className={th}>Status</th><th className={th}></th></tr></thead>
               <tbody>
-                {rules.data.map((rule) => (
+                {visibleRules(rules.data, search, statusFilter).map((rule) => (
                   <tr key={rule.id}>
                     <td className={td}>{rule.priority}</td>
                     <td className={td}>
                       <p className="font-medium text-slate-900">{rule.name} <span className="font-mono text-xs font-normal text-slate-500">{rule.ruleId}</span></p>
                       {rule.description && <p className="mt-0.5 max-w-xl text-xs text-slate-500">{rule.description}</p>}
+                      {viewing === rule.id && (
+                        <div className="mt-2 max-w-xl rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                          <p><span className="font-semibold">Condition:</span> {describeCondition(rule.condition, facts.data ?? [])}</p>
+                          <p className="mt-1 font-semibold">Suggested actions (prompts for review, not orders):</p>
+                          <ul className="list-disc pl-4">{rule.recommendedActions.map((a) => <li key={a}>{a}</li>)}</ul>
+                          <pre className="mt-2 overflow-x-auto rounded bg-white p-2 font-mono">{JSON.stringify(rule.condition, null, 2)}</pre>
+                          <p className="mt-1 text-slate-500">Last changed {new Date(rule.updatedAt).toLocaleString()}</p>
+                        </div>
+                      )}
                     </td>
                     <td className={td}><SeverityBadge severity={rule.severity} /></td>
                     <td className={td}>{rule.enabled ? <Badge tone="green">Enabled</Badge> : <Badge>Disabled</Badge>}</td>
                     <td className={`${td} whitespace-nowrap text-right`}>
-                      <Button variant="ghost" onClick={() => toggle(rule)}>{rule.enabled ? 'Disable' : 'Enable'}</Button>
-                      <Button variant="ghost" onClick={() => open(rule)}>Edit</Button>
-                      <Button variant="danger" className="ml-1" onClick={() => remove(rule)}>Delete</Button>
+                      <Button variant="ghost" onClick={() => setViewing(viewing === rule.id ? undefined : rule.id)}>{viewing === rule.id ? 'Hide' : 'View'}</Button>
+                      {isAdmin && <>
+                        <Button variant="ghost" onClick={() => toggle(rule)}>{rule.enabled ? 'Deactivate' : 'Activate'}</Button>
+                        <Button variant="ghost" onClick={() => open(rule)}>Edit</Button>
+                        <Button variant="danger" className="ml-1" onClick={() => remove(rule)}>Delete</Button>
+                      </>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
           )}
+        <p className="mt-3 text-xs text-slate-500">Rules are evaluated in priority order (1 first). Activation is validated by the backend; an invalid rule cannot be activated. All sample rules are illustrative and not clinically validated.</p>
       </Card>
 
       <Card title="Writing conditions">

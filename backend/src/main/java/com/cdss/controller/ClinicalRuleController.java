@@ -15,27 +15,44 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.cdss.dto.FactResponse;
+import com.cdss.dto.RuleDryRunRequest;
+import com.cdss.dto.RuleDryRunResponse;
 import com.cdss.dto.RuleRequest;
 import com.cdss.dto.RuleResponse;
+import com.cdss.dto.RuleSummaryResponse;
 import com.cdss.dto.RuleValidationResponse;
 import com.cdss.service.ClinicalRuleService;
+import com.cdss.service.DecisionService;
 
 import jakarta.validation.Valid;
 
-/** Clinical rules stored as JSON. Invalid rules are rejected with 400 and a list of problems. */
+/**
+ * Clinical rules stored as JSON. Invalid rules are rejected with 400 and a list
+ * of problems. Everything here is ADMIN only except {@code GET /summaries}
+ * (see SecurityConfig), so clinicians never receive the JSON definitions.
+ */
 @RestController
 @RequestMapping("/api/rules")
 public class ClinicalRuleController {
 
 	private final ClinicalRuleService ruleService;
 
-	public ClinicalRuleController(ClinicalRuleService ruleService) {
+	private final DecisionService decisionService;
+
+	public ClinicalRuleController(ClinicalRuleService ruleService, DecisionService decisionService) {
 		this.ruleService = ruleService;
+		this.decisionService = decisionService;
 	}
 
 	@GetMapping
 	public List<RuleResponse> list() {
 		return ruleService.findAll();
+	}
+
+	/** Rules in plain English without their JSON definitions; the only rule endpoint clinicians may use. */
+	@GetMapping("/summaries")
+	public List<RuleSummaryResponse> summaries() {
+		return ruleService.summaries();
 	}
 
 	@GetMapping("/{id}")
@@ -53,6 +70,24 @@ public class ClinicalRuleController {
 	@PostMapping("/validate")
 	public RuleValidationResponse validate(@Valid @RequestBody RuleRequest request) {
 		return ruleService.validate(request);
+	}
+
+	/** Tries a condition (not saved) against one patient's current data. Nothing is stored. */
+	@PostMapping("/dry-run")
+	public RuleDryRunResponse dryRun(@Valid @RequestBody RuleDryRunRequest request) {
+		return decisionService.dryRun(request);
+	}
+
+	/** Switches a rule on after validating it again; 400 with the problems if it is no longer valid. */
+	@PostMapping("/{id}/activate")
+	public RuleResponse activate(@PathVariable Long id) {
+		return ruleService.activate(id);
+	}
+
+	/** Switches a rule off (works even if the rule has become invalid). */
+	@PostMapping("/{id}/deactivate")
+	public RuleResponse deactivate(@PathVariable Long id) {
+		return ruleService.deactivate(id);
 	}
 
 	@PostMapping
