@@ -1,0 +1,12 @@
+# Local development profile. Loads variables from the repository-root .env
+# (the backend runs with backend/ as its working directory). Real environment
+# variables still take precedence over values in the file.
+spring:
+  config:
+    import: optional:file:../.env[.properties]
+
+# Temporary until login is implemented (step F): lets the /api endpoints be
+# used locally without authentication. Never enable outside local development.
+cdss:
+  security:
+    open-api: true

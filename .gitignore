@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+
+# ---------------------------------------------------------------
+# Environment files & local secrets
+# (commit only .env.example with dummy values)
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# ---------------------------------------------------------------
+# Node.js / frontend
+# (package.json and package-lock.json ARE committed)
+# ---------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.vite/
+frontend/dist/
+frontend/dist-ssr/
+coverage/
+
+# Playwright outputs
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# ---------------------------------------------------------------
+# Java / Maven
+# (pom.xml, mvnw, mvnw.cmd and .mvn/wrapper/maven-wrapper.properties
+#  ARE committed)
+# ---------------------------------------------------------------
+target/
+*.class
+hs_err_pid*
+replay_pid*
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+
+# ---------------------------------------------------------------
+# IDEs and editors
+# ---------------------------------------------------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+backend/out/
+.vscode/*
+!.vscode/extensions.json
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.sts4-cache/
+backend/bin/
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------
+# Logs and generated outputs
+# ---------------------------------------------------------------
+logs/
+*.log
